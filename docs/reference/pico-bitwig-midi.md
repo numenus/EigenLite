@@ -46,6 +46,21 @@ as a MIDI controller in Bitwig through:
 - sent only when the MIDI 7-bit value changes
 - when ribbon touch becomes inactive, value is sent as `0`
 
+### Mode Buttons
+
+- the 4 Pico body buttons -> MIDI Note On/Off, channel 1
+- note number = `44 + button` (44-47), velocity 127, momentary
+- sits just below the main-key note range (48-65) so it never collides
+- same mapping in both `stable` and `parity`
+- Bitwig-mappable via ordinary MIDI learn, like any other controller button
+
+### Roll (parity mode only)
+
+- last-touched main key's roll (tilt) -> `CC74`
+- only sent in `parity` mode; `stable` mode does not send it
+- diagnostic/expressive signal, not gated on note-on state
+- sent only when the MIDI 7-bit value changes
+
 ## Transport Path
 
 ```text
@@ -96,6 +111,7 @@ Example:
 Expected event types:
 
 - `key ...`
+- `button ...`
 - `breath ...`
 - `strip ...`
 - `gate note_on ... [parity]`

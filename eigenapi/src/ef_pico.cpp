@@ -301,7 +301,7 @@ void EF_Pico::Delegate::kbd_breath(unsigned long long t, unsigned v) {
             breathZero_ = fv;
         }
     } else {
-        parent_.fireBreathEvent(t, fv - breathZero_);
+        parent_.fireBreathEvent(t, clip(fv - breathZero_));
     }
 }
 

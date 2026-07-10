@@ -19,6 +19,8 @@ namespace {
 
 constexpr uint8_t kBreathCc = 2;
 constexpr uint8_t kRibbonCc = 21;
+constexpr uint8_t kRollCc = 74;
+constexpr uint8_t kModeButtonBaseNote = 44;
 constexpr float kBreathMidiGain = 6.0f;
 constexpr float kParityBreathDeadband = 0.015f;
 constexpr float kParityBreathGain = 4.0f;
@@ -145,6 +147,7 @@ class MidiBridgeImplementation {
     virtual ~MidiBridgeImplementation() = default;
     virtual const char* name() const = 0;
     virtual void on_key(UdpMidiOut& out, bool debug, DebugScope debug_scope, unsigned long long t, unsigned course, unsigned key, bool active, float p, float r, float y) = 0;
+    virtual void on_button(UdpMidiOut& out, bool debug, DebugScope debug_scope, unsigned long long t, unsigned key, bool active) = 0;
     virtual void on_breath(UdpMidiOut& out, bool debug, DebugScope debug_scope, unsigned long long t, float val) = 0;
     virtual void on_strip(UdpMidiOut& out, bool debug, DebugScope debug_scope, unsigned long long t, unsigned strip, float val, bool active) = 0;
 };
@@ -185,6 +188,23 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
                 key_down_[key] = false;
             }
             last_pressure_[key] = 0xFF;
+        }
+    }
+
+    void on_button(UdpMidiOut& out, bool debug, DebugScope debug_scope, unsigned long long /*t*/, unsigned key, bool active) override {
+        if (key >= 4) {
+            return;
+        }
+
+        if (debug && (debug_scope == DebugScope::All || debug_scope == DebugScope::Gates)) {
+            std::cout << "button key=" << key << " active=" << active << std::endl;
+        }
+
+        const uint8_t note = static_cast<uint8_t>(kModeButtonBaseNote + key);
+        if (active) {
+            out.send3(0x90, note, 127);
+        } else {
+            out.send3(0x80, note, 0);
         }
     }
 
@@ -236,7 +256,7 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
         return "parity";
     }
 
-    void on_key(UdpMidiOut& out, bool debug, DebugScope debug_scope, unsigned long long t, unsigned course, unsigned key, bool active, float p, float /*r*/, float /*y*/) override {
+    void on_key(UdpMidiOut& out, bool debug, DebugScope debug_scope, unsigned long long t, unsigned course, unsigned key, bool active, float p, float r, float /*y*/) override {
         if (course != 0 || key >= 128) {
             return;
         }
@@ -252,6 +272,13 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
         if (debug && debug_scope == DebugScope::All) {
             std::cout << "key course=" << course << " key=" << key << " active=" << active
                       << " pressure=" << p << " [parity]" << std::endl;
+        }
+
+        // Diagnostic per-key roll, parity-mode only: last-touched key's tilt as a
+        // single CC. Not gated on note-on state -- it's an auxiliary expressive
+        // signal, not part of note triggering.
+        if (active) {
+            send_cc(out, kRollCc, (r + 1.0f) * 0.5f, 2);
         }
 
         auto& state = keys_[key];
@@ -448,6 +475,10 @@ class MidiBridgeCallback : public EigenApi::LifecycleCallback, public EigenApi::
 
     void key(const char* /*dev*/, unsigned long long t, unsigned course, unsigned key, bool active, float p, float r, float y) override {
         impl_->on_key(out_, debug_, debug_scope_, t, course, key, active, p, r, y);
+    }
+
+    void button(const char* /*dev*/, unsigned long long t, unsigned key, bool active) override {
+        impl_->on_button(out_, debug_, debug_scope_, t, key, active);
     }
 
     void breath(const char* /*dev*/, unsigned long long t, float val) override {

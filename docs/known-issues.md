@@ -6,13 +6,20 @@ Active limitations and deferred work. Sourced from code analysis and `docs/archi
 
 ## Normalisation Violations
 
-### Pico Breath Not Clamped After Gain (FINDING-1)
+### Pico Breath Not Clamped After Gain (FINDING-1) — Fixed
 - Spec (`technical-requirements.md`): breath must be clamped to [-1, 1].
-- Pico applies a 1.4× gain to the raw breath value. The result is **not** clamped.
-- Observed in captures: min -1.195 (= raw -0.854 × 1.4).
-- Impact: callers receiving `breath()` from a Pico device may see values slightly outside [-1, 1].
-- Fix: add `std::clamp(val, -1.f, 1.f)` in `ef_pico.cpp` after gain application.
-- Workaround: contract tests use [-1.3, 1.3] tolerance pending the fix.
+- Root cause was not the 1.4x gain itself — `breathToFloat()` in `ef_harp.h`
+  already `clip()`s that. It was the warm-up zero-offset subtraction in
+  `ef_pico.cpp`'s `kbd_breath` (`fv - breathZero_`), applied *after* that clip,
+  which could push the result back outside [-1, 1].
+- Observed in captures: min -1.195.
+- Fix applied: wrap the subtraction in `clip(...)` too (`ef_pico.cpp`).
+- The checked-in `PICO_*.elcf` fixture still contains pre-fix captured values
+  (the replay harness replays stored floats verbatim, doesn't recompute them),
+  so `ApiContractTest.cpp`'s `PicoSession1.BreathNormalisedValues` keeps a
+  [-1.3, 1.3] tolerance for that fixture specifically (same pattern as
+  FINDING-2). Regenerate the PICO capture on real hardware to tighten it to
+  [-1, 1].
 
 ---
 

@@ -3,10 +3,15 @@
 // All bounds derived from docs/technical-requirements.md#normalisation-requirements.
 // Findings (known spec violations) are marked FINDING and explain the deviation.
 //
-// FINDING-1: PICO breath exceeds [-1,1]. Spec requires clamping; Pico applies
-//   1.4× gain but does not clamp. Observed min: -1.195. Bug, not hardware drift.
-//   Tracked in docs/known-issues.md. Tests use [-1.3, 1.3] tolerance for PICO breath
-//   so the suite stays green while the bug is documented.
+// FINDING-1 (fixed in code, not in this fixture): PICO breath exceeded [-1,1].
+//   Root cause was not the 1.4x gain itself (breathToFloat already clip()s
+//   that) but the warm-up zero-offset subtraction in ef_pico.cpp kbd_breath,
+//   applied after the clip. Fixed by clip()ing again post-subtraction.
+//   PICO_*.elcf below was captured (via eigenlite-capture) before this fix, and
+//   the replay harness replays its stored float values verbatim rather than
+//   recomputing them — so it still exercises the old out-of-range values.
+//   Same situation as FINDING-2: tolerance stays loose for this specific
+//   pre-fix fixture; regenerate it on real hardware to tighten this test.
 //
 // FINDING-2: TAU captures pre-dating the ef_tau.cpp fix contain button key=252 and
 //   key=253. These are BREATH1 (key 85 → 85-89 = -4 → uint8 252) and BREATH2
@@ -356,10 +361,10 @@ TEST_F(PicoSession1, StripNormalisedValues) {
 }
 
 TEST_F(PicoSession1, BreathNormalisedValues) {
-    // FINDING-1: PICO breath is not clamped after 1.4× gain.
-    // Spec requires [-1, 1]; observed min -1.195 on real hardware.
-    // Tolerance extended to [-1.3, 1.3] until the clamp is fixed.
-    // See: docs/known-issues.md, technical-requirements.md §normalisation-requirements.
+    // FINDING-1 (fixed): warm-up zero-offset subtraction in ef_pico.cpp's
+    // kbd_breath ran after breathToFloat()'s clip(), so subtracting breathZero_
+    // could push the result back outside [-1,1] even though the gain step
+    // itself was already clamped. Now clip()'d again post-subtraction.
     auto evs = cb_.ofType("breath");
     EXPECT_GT(evs.size(), 0u) << "no breath events in PICO session";
     for (const auto& ev : evs) {
