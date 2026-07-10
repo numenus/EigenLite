@@ -116,17 +116,15 @@ EigenLite currently exposes only absolute strip position.
 - relative ribbon is better for vibrato, nudging, pitch gestures, and motion around a touch point
 - both together make the ribbon more expressive and less “one generic slider”
 
-#### Proposed MIDI Exposure
+#### Proposed MIDI Exposure — Implemented
 
-Recommended parity mapping:
+- `CC21` = absolute ribbon (both modes)
+- `CC22` = relative ribbon delta, `parity` mode only
 
-- `CC21` = absolute ribbon
-- `CC22` = relative ribbon delta
-
-Alternative:
-
-- keep `CC21` as the stable-compatible default
-- expose relative ribbon only in `parity` mode at first
+`CC21` stays the stable-compatible default; `CC22` is additive and only
+present in `parity`. See `docs/reference/pico-bitwig-midi.md#relative-ribbon-parity-mode-only`.
+Live-feel validation (does it actually help with vibrato/nudge gestures in
+Bitwig) is still open — see Phase 3 below.
 
 #### Risk
 
@@ -214,6 +212,8 @@ Success criteria:
 
 ### Phase 3: Ribbon Parity
 
+Status: implemented, needs live validation
+
 Goal:
 
 - add relative ribbon semantics while preserving absolute ribbon utility
@@ -222,6 +222,12 @@ Why third:
 
 - ribbon already works acceptably in `stable`
 - parity here is about expressive expansion, not basic recovery
+
+Current state:
+
+- `CC22` relative delta implemented in `ParityMidiBridgeImplementation::on_strip`,
+  origin captured on touch-start, centred at `CC 64`
+- not yet evaluated in real Bitwig play (vibrato/nudge gestures)
 
 Success criteria:
 

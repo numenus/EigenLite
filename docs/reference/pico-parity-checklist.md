@@ -31,13 +31,34 @@ Use this checklist when evaluating `stable` vs `parity` bridge mode in Bitwig.
 - absolute ribbon mapping is stable
 - ribbon spans a useful modulation range
 - no obvious jitter or unusable dead zones
-- if parity relative ribbon is added later, evaluate it separately
+
+## Relative Ribbon (parity mode, `CC22`)
+
+- centres at `CC 64` at touch-start with no perceived jump
+- delta grows/shrinks smoothly as the finger moves away from touch-start
+- resets cleanly to centre on release
+- useful for vibrato/nudge-style Bitwig mappings, not just theoretically distinct from absolute
+
+## Mode Buttons
+
+- all 4 body buttons produce a clean Note On/Off pair (notes 44-47)
+- no stuck notes after repeated presses
+- Bitwig MIDI-learns each button independently
+
+## LED Feedback
+
+- pressing a key/button lights it orange immediately
+- releasing restores the previous DAW-set colour (default off)
+- a channel-16 Note On from Bitwig changes the corresponding key's base colour
+- colour change while a key is held is deferred until release, not lost
+- LEDs recover correctly after a Bitwig restart / bridge restart
 
 ## Bitwig Integration
 
 - notes arrive reliably
 - breath mapping is learnable/useful
 - ribbon mapping is learnable/useful
+- mode buttons are learnable/useful
 - controller behavior remains stable after reopening Bitwig
 
 ## Stability

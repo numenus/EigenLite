@@ -19,6 +19,7 @@ namespace {
 
 constexpr uint8_t kBreathCc = 2;
 constexpr uint8_t kRibbonCc = 21;
+constexpr uint8_t kRibbonRelativeCc = 22;
 constexpr uint8_t kRollCc = 74;
 constexpr uint8_t kModeButtonBaseNote = 44;
 // LED control protocol (Bitwig -> Pico): Note On, channel 16 (status 0x9F).
@@ -528,9 +529,28 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
             std::cout << "strip " << strip << " value=" << val << " active=" << active << " [parity]" << std::endl;
         }
         send_cc(out, kRibbonCc, active ? val : 0.0f, 1);
+
+        // Relative ribbon: delta from touch origin, centred at CC 64 (no
+        // displacement). Origin is captured on touch-start and held for the
+        // duration of the touch, independent of the absolute-position CC above.
+        if (strip < kMaxStrips) {
+            if (active) {
+                if (!strip_touching_[strip]) {
+                    strip_origin_[strip] = val;
+                }
+                const float rel = val - strip_origin_[strip];
+                const float rel_unipolar = std::max(0.0f, std::min(1.0f, (rel + 1.0f) * 0.5f));
+                send_cc(out, kRibbonRelativeCc, rel_unipolar, 3);
+            } else {
+                send_cc(out, kRibbonRelativeCc, 0.5f, 3);
+            }
+            strip_touching_[strip] = active;
+        }
     }
 
    private:
+    static constexpr unsigned kMaxStrips = 4;
+
     struct KeyState {
         bool tracking = false;
         bool note_on = false;
@@ -560,6 +580,8 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
     uint8_t last_pressure_[128] = {0xFF};
     uint8_t last_cc_[8] = {0xFF};
     int breath_hold_ticks_ = 0;
+    float strip_origin_[kMaxStrips] = {0.0f};
+    bool strip_touching_[kMaxStrips] = {false};
 };
 
 static std::unique_ptr<MidiBridgeImplementation> make_bridge_implementation(BridgeModeKind mode) {

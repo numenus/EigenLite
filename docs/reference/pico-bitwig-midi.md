@@ -46,6 +46,17 @@ as a MIDI controller in Bitwig through:
 - sent only when the MIDI 7-bit value changes
 - when ribbon touch becomes inactive, value is sent as `0`
 
+### Relative Ribbon (parity mode only)
+
+- Pico ribbon delta from touch origin -> `CC22`
+- origin is captured on touch-start, held for the duration of the touch
+- centred at `CC 64` (no displacement); increases/decreases from there as the
+  finger moves away from the touch-start point
+- resets to centre (`CC 64`) when the touch ends
+- only sent in `parity` mode; absolute `CC21` above still works in both modes
+- good for vibrato/nudge-style gestures where "how far have I moved" matters
+  more than "where am I on the strip"
+
 ### Mode Buttons
 
 - the 4 Pico body buttons -> MIDI Note On/Off, channel 1

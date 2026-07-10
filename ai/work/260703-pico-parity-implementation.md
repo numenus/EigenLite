@@ -79,17 +79,19 @@ Acceptance:
 
 ### Phase 3: Ribbon Parity
 
-Status: not started
+Status: implemented, needs live validation
 
 Current state:
 
-- parity ribbon currently aliases stable behavior
+- `CC21` absolute ribbon unchanged in both modes
+- `CC22` relative ribbon delta added, `parity` mode only: origin captured on
+  touch-start, centred at `CC 64`, resets to centre on release
+- not yet evaluated in real Bitwig play
 
 Tasks:
 
-- design MIDI exposure for both absolute and relative ribbon semantics
-- test whether Bitwig can use relative ribbon cleanly
-- keep absolute ribbon stable and predictable
+- test whether Bitwig can use relative ribbon cleanly for vibrato/nudge gestures
+- keep absolute ribbon stable and predictable (unaffected, unchanged)
 - decide whether relative ribbon is default parity behavior or optional extra mapping
 
 Acceptance:
@@ -116,7 +118,7 @@ Acceptance:
 
 1. Should strict parity be pursued from EigenLite normalized callbacks only?
 2. Do we need raw Pico sensor access in a lower layer to achieve real breath parity?
-3. Should relative ribbon output use a dedicated CC or a different MIDI representation?
+3. ~~Should relative ribbon output use a dedicated CC or a different MIDI representation?~~ Resolved: dedicated `CC22`, parity-mode only.
 4. Do Bitwig controller-learn limitations argue for a Bitwig-specific controller script later?
 
 ## Next Concrete Work

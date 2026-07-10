@@ -51,7 +51,9 @@ These values were chosen based on practical observation, not a strict port of Ei
 
 ## Strip: Absolute Values Only
 
-EigenLite exposes only the absolute strip position. EigenD (at module level) also exposes relative (delta from touch origin). Computing relative is left to the application.
+EigenLite core exposes only the absolute strip position. EigenD (at module level) also exposes relative (delta from touch origin). Computing relative is left to the application.
+
+`tools/pico_udp_midi_bridge.cpp` now does this at the application level for the Bitwig bridge (`parity` mode, `CC22`) — see `docs/reference/pico-bitwig-midi.md#relative-ribbon-parity-mode-only`. Other EigenLite consumers still have to compute it themselves.
 
 ---
 

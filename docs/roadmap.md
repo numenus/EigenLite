@@ -30,6 +30,8 @@ Expose Alpha/Tau headphone control via the public API:
 ### Relative Strip Values
 Expose relative strip position (delta from touch origin) in addition to the current absolute value. EigenD module level already computes this.
 
+Implemented at the bridge-tool level (`tools/pico_udp_midi_bridge.cpp`, `parity` mode only, `CC22`) — see `docs/reference/pico-bitwig-midi.md#relative-ribbon-parity-mode-only`. Still computed downstream of the library, not exposed by `eigenapi/` itself; move it into `ef_pico.cpp` if other consumers need it without re-deriving it themselves.
+
 ---
 
 ## Design Considerations (Not Committed)
