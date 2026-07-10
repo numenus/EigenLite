@@ -19,13 +19,27 @@ If this worked before and you just want the least-pain repeatable path:
 2. In Windows PowerShell, run:
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File "\\wsl.localhost\Ubuntu-26.04\home\hotpo\repos\EigenLite\tools\pico-online.ps1" -BitwigInputPort "Pico In" -BitwigOutputPort "Pico Out" -StartWsl -Watch
+```
+
+`-StartWsl` launches the WSL bridge (`pico-online-wsl.sh`) itself in a second
+window, so this one command replaces the old two-step (Windows script + WSL
+script) bring-up. `-Watch` keeps this window running afterward and
+automatically re-arms the Pico (firmware reload + `usbipd` re-attach) if it
+detects a real unplug/replug, without needing the whole sequence re-run by
+hand -- the already-running WSL bridge reconnects on its own once EigenLite's
+discovery thread sees the device again.
+
+Without `-StartWsl`/`-Watch` (the original step-by-step flow still works):
+
+```powershell
 powershell -ExecutionPolicy Bypass -File "\\wsl.localhost\Ubuntu-26.04\home\hotpo\repos\EigenLite\tools\pico-online.ps1" -BitwigInputPort "Pico In" -BitwigOutputPort "Pico Out"
 ```
 
 This loads firmware, tries to attach the operational device to WSL, and starts one Windows MIDI host process that:
 
 - forwards Pico UDP MIDI into the Bitwig input loopMIDI port
-- optionally opens the separate Bitwig output loopMIDI port and discards anything Bitwig sends there
+- optionally opens the separate Bitwig output loopMIDI port and forwards Bitwig's outbound MIDI to WSL as the LED control channel (see `docs/reference/pico-bitwig-midi.md#led-feedback`)
 - automatically stops stale `udp_midi_receiver.py` processes before relaunching
 - tears both handles down together when that PowerShell window exits
 
@@ -40,6 +54,10 @@ This auto-detects the Windows-side WSL host IP, builds the bridge if needed, and
 4. In Bitwig, use your chosen input loopMIDI port on an armed instrument track, and if Bitwig wants a controller output port, point it at the separate output loopMIDI port.
 
 If `usbipd attach` needs elevation, rerun the Windows PowerShell as Administrator or pass `-BusId <BUSID>` explicitly.
+
+**Not yet live-tested end to end** (`-StartWsl`, `-Watch`, and the LED
+forwarding path were written and code-reviewed but need a real Windows +
+Bitwig + Pico session to confirm) -- see `docs/known-issues.md`.
 
 ---
 

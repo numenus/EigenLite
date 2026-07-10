@@ -4,6 +4,25 @@ Active limitations and deferred work. Sourced from code analysis and `docs/archi
 
 ---
 
+## Windows-Side Bridge Features Not Yet Live-Tested
+
+Written and code-reviewed on the WSL/Linux side (build passes, unit tests
+pass), but the Windows-only halves cannot be exercised without a real
+Windows + Bitwig + Pico session:
+
+- LED control forwarding: `udp_midi_receiver.py --forward-host` /
+  `udp_midi_sink.py --forward-host` (Bitwig -> Pico LED channel)
+- `pico-online.ps1 -StartWsl` (single-command bring-up, invokes the WSL
+  bridge via `wsl.exe`)
+- `pico-online.ps1 -Watch` (auto re-arm on unplug/replug via USB-state
+  polling)
+
+Run through `docs/reference/pico-parity-checklist.md`'s LED section and the
+reconnect scenario in `docs/reference/pico-wsl-bitwig.md` before relying on
+these day to day.
+
+---
+
 ## Normalisation Violations
 
 ### Pico Breath Not Clamped After Gain (FINDING-1) — Fixed

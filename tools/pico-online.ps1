@@ -13,7 +13,11 @@ param(
     [switch]$SkipAttach,
     [switch]$SkipReceiver,
     [switch]$SkipSink,
-    [switch]$SkipLedForward
+    [switch]$SkipLedForward,
+    [switch]$Watch,
+    [int]$WatchIntervalSeconds = 5,
+    [switch]$StartWsl,
+    [string]$WslArgs = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -68,13 +72,13 @@ function Find-PicoBusId {
 }
 
 function Get-WslIp([string]$Distro) {
-    $wslArgs = @()
+    $hostnameArgs = @()
     if ($Distro) {
-        $wslArgs += @("-d", $Distro)
+        $hostnameArgs += @("-d", $Distro)
     }
-    $wslArgs += @("hostname", "-I")
+    $hostnameArgs += @("hostname", "-I")
     try {
-        $output = & wsl @wslArgs 2>&1
+        $output = & wsl @hostnameArgs 2>&1
     } catch {
         return $null
     }
@@ -203,57 +207,80 @@ if (-not $FirmwarePath) {
     $FirmwarePath = Resolve-FirstExisting @($FirmwarePath) "pico.ihx"
 }
 
-if (-not $SkipFirmware) {
-    $usbState = Get-PicoUsbState -Loader $LoaderPath -PythonCmd $pythonCmd
-    if ($usbState.HasPreload) {
-        Write-Host "Pre-load Pico detected. Loading firmware with $LoaderPath"
-        & $pythonCmd $LoaderPath --firmware $FirmwarePath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Firmware load failed."
+function Invoke-PicoArm([bool]$SkipFirmwareStep, [bool]$SkipAttachStep, [string]$Loader, [string]$PythonCmd, [string]$Firmware, [string]$InitialBusId, [bool]$Quiet) {
+    # Redoes firmware-load + usbipd bind/attach. Returns the resolved bus ID on
+    # success, $null on failure. In -Quiet mode, failures are logged instead of
+    # thrown, so a watch loop can keep retrying after a real unplug/replug
+    # instead of killing the whole script.
+    $busId = $InitialBusId
+
+    function Fail([string]$Message) {
+        if ($Quiet) {
+            Write-Host "WARNING: $Message"
+            return $false
         }
-    } elseif ($usbState.HasPostload) {
-        Write-Host "Post-load Pico already present. Skipping firmware load."
-    } else {
-        $existingBusId = $BusId
-        if (-not $existingBusId) {
-            $existingBusId = Find-PicoBusId
-        }
-        if ($existingBusId) {
-            Write-Host "No Windows-side Pico USB descriptor detected, but usbipd can already see Pico bus ID $existingBusId. Skipping firmware load."
-            $BusId = $existingBusId
-        } else {
-            Write-Host "No known Pico USB state detected. Attempting firmware load anyway."
-            & $pythonCmd $LoaderPath --firmware $FirmwarePath
+        throw $Message
+    }
+
+    if (-not $SkipFirmwareStep) {
+        $usbState = Get-PicoUsbState -Loader $Loader -PythonCmd $PythonCmd
+        if ($usbState.HasPreload) {
+            Write-Host "Pre-load Pico detected. Loading firmware with $Loader"
+            & $PythonCmd $Loader --firmware $Firmware
             if ($LASTEXITCODE -ne 0) {
-                throw "Firmware load failed."
+                if (-not (Fail "Firmware load failed.")) { return $null }
+            }
+        } elseif ($usbState.HasPostload) {
+            Write-Host "Post-load Pico already present. Skipping firmware load."
+        } else {
+            $existingBusId = $busId
+            if (-not $existingBusId) {
+                $existingBusId = Find-PicoBusId
+            }
+            if ($existingBusId) {
+                Write-Host "No Windows-side Pico USB descriptor detected, but usbipd can already see Pico bus ID $existingBusId. Skipping firmware load."
+                $busId = $existingBusId
+            } else {
+                Write-Host "No known Pico USB state detected. Attempting firmware load anyway."
+                & $PythonCmd $Loader --firmware $Firmware
+                if ($LASTEXITCODE -ne 0) {
+                    if (-not (Fail "Firmware load failed.")) { return $null }
+                }
             }
         }
     }
-}
 
-if (-not $SkipAttach) {
-    if (-not $BusId) {
-        $BusId = Find-PicoBusId
-    }
-    if (-not $BusId) {
-        throw "Could not determine Pico usbipd bus ID. Run 'usbipd list' and pass -BusId manually."
-    }
+    if (-not $SkipAttachStep) {
+        if (-not $busId) {
+            $busId = Find-PicoBusId
+        }
+        if (-not $busId) {
+            if (-not (Fail "Could not determine Pico usbipd bus ID. Run 'usbipd list' and pass -BusId manually.")) { return $null }
+        }
 
-    Write-Host "Attaching Pico bus ID $BusId to WSL"
-    $bindResult = Invoke-UsbipdCommand "bind --busid $BusId"
-    if ($bindResult.ExitCode -ne 0) {
-        throw "usbipd bind failed. If bind needs elevation, rerun this PowerShell as Administrator."
-    }
+        Write-Host "Attaching Pico bus ID $busId to WSL"
+        $bindResult = Invoke-UsbipdCommand "bind --busid $busId"
+        if ($bindResult.ExitCode -ne 0) {
+            if (-not (Fail "usbipd bind failed. If bind needs elevation, rerun this PowerShell as Administrator.")) { return $null }
+        }
 
-    $attachResult = Invoke-UsbipdCommand "attach --wsl --busid $BusId"
-    if ($attachResult.ExitCode -ne 0) {
-        $attachText = $attachResult.Output
-        if ($attachText -match "already attached to a client") {
-            Write-Host "Pico bus ID $BusId is already attached to WSL. Continuing."
-        } else {
-            throw "usbipd attach failed. If bind/attach needs elevation, rerun this PowerShell as Administrator."
+        $attachResult = Invoke-UsbipdCommand "attach --wsl --busid $busId"
+        if ($attachResult.ExitCode -ne 0) {
+            $attachText = $attachResult.Output
+            if ($attachText -match "already attached to a client") {
+                Write-Host "Pico bus ID $busId is already attached to WSL. Continuing."
+            } elseif (-not (Fail "usbipd attach failed. If bind/attach needs elevation, rerun this PowerShell as Administrator.")) {
+                return $null
+            }
         }
     }
+
+    return $busId
+}
+
+$BusId = Invoke-PicoArm -SkipFirmwareStep $SkipFirmware -SkipAttachStep $SkipAttach -Loader $LoaderPath -PythonCmd $pythonCmd -Firmware $FirmwarePath -InitialBusId $BusId -Quiet $false
+if ((-not $BusId) -and (-not $SkipAttach)) {
+    throw "Could not arm the Pico (firmware load / usbipd attach failed)."
 }
 
 if (-not $SkipReceiver) {
@@ -279,4 +306,37 @@ Write-Host ""
 Write-Host "Windows side is ready."
 Write-Host "Bitwig input port:  $BitwigInputPort"
 Write-Host "Bitwig output port: $BitwigOutputPort"
-Write-Host "Next: in WSL run ./tools/pico-online-wsl.sh"
+
+if ($StartWsl) {
+    $distroArg = ""
+    if ($WslDistro) {
+        $distroArg = "-d $WslDistro "
+    }
+    $wslCommand = "wsl.exe $($distroArg)-- /home/hotpo/repos/EigenLite/tools/pico-online-wsl.sh $WslArgs"
+    Write-Host "Starting WSL bridge: $wslCommand"
+    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoExit", "-Command", $wslCommand) | Out-Null
+} else {
+    Write-Host "Next: in WSL run ./tools/pico-online-wsl.sh"
+}
+
+if ($Watch) {
+    Write-Host ""
+    Write-Host "Watching for Pico reconnects every $WatchIntervalSeconds s (Ctrl+C to stop)..."
+    while ($true) {
+        Start-Sleep -Seconds $WatchIntervalSeconds
+        try {
+            $state = Get-PicoUsbState -Loader $LoaderPath -PythonCmd $pythonCmd
+        } catch {
+            continue
+        }
+        if ($state.HasPreload -and -not $state.HasPostload) {
+            Write-Host "Pico reconnect detected (pre-load state) -- re-arming."
+            $newBusId = Invoke-PicoArm -SkipFirmwareStep $false -SkipAttachStep $SkipAttach -Loader $LoaderPath -PythonCmd $pythonCmd -Firmware $FirmwarePath -InitialBusId "" -Quiet $true
+            if ($newBusId) {
+                Write-Host "Pico re-armed (bus ID $newBusId). The already-running WSL bridge should reconnect via EigenLite's own discovery thread -- no restart needed on either side."
+            } else {
+                Write-Host "Re-arm attempt failed; will retry on the next watch tick."
+            }
+        }
+    }
+}
