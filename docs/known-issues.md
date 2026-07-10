@@ -57,9 +57,9 @@ EigenLite exposes only the absolute strip position. EigenD (at module level) als
 
 ## Pico Key-Press LEDs
 
-On Tau/Alpha, the basestation firmware automatically lights a key orange when pressed (non-configurable at the firmware level). The Pico does not do this. EigenLite does not compensate.
+On Tau/Alpha, the basestation firmware automatically lights a key orange when pressed (non-configurable at the firmware level). The Pico does not do this. EigenLite core does not compensate.
 
-EigenD's pico module implements this in software. EigenLite could do the same but has not.
+EigenD's pico module implements this in software. EigenLite's `eigenapi/` could do the same but has not — `tools/pico_udp_midi_bridge.cpp` implements it at the bridge-tool level instead (`LedState`, see `docs/reference/pico-bitwig-midi.md#led-feedback`), so it's specific to the Bitwig bridge, not available to other EigenLite consumers.
 
 ---
 

@@ -61,6 +61,40 @@ as a MIDI controller in Bitwig through:
 - diagnostic/expressive signal, not gated on note-on state
 - sent only when the MIDI 7-bit value changes
 
+## LED Feedback
+
+Two independent behaviors, layered: a DAW-set base colour per key, with a
+transient press overlay on top.
+
+### Auto key-press light
+
+- pressing any main key or mode button lights it orange
+- on release, it reverts to that key's current base colour (default off)
+- local to the WSL bridge; no DAW involvement; same in `stable` and `parity`
+
+### Bitwig -> Pico LED control
+
+- dedicated MIDI channel 16, Note On (status `0x9F`)
+- note = key/button index: `0-17` main keys, `18-21` mode buttons
+- velocity = colour: `0`=off, `1`=green, `2`=red, `3`=orange
+- sets that key's base colour; applied immediately unless the key is currently
+  held, in which case it's applied on release
+
+### Transport
+
+```text
+Bitwig -> loopMIDI "Pico Out" -> Windows sink (udp_midi_receiver.py --sink-in)
+-> UDP 5006 -> WSL pico-udp-midi-bridge -> harp.setLED()
+```
+
+- Windows resolves the WSL IP automatically (`wsl hostname -I`) in
+  `pico-online.ps1`; override with `-WslDistro` if you run multiple distros
+- WSL side listens on UDP `5006` by default; override with
+  `pico-online-wsl.sh --led-port PORT`, or disable with `--no-led`
+- disable on the Windows side with `pico-online.ps1 -SkipLedForward`
+- use `tools/pico-led-test.cpp` (`tools/pico-led-test.sh`) as a standalone
+  sanity check of `setLED()` independent of the MIDI/UDP plumbing
+
 ## Transport Path
 
 ```text

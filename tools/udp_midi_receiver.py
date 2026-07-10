@@ -147,7 +147,15 @@ def should_print_midi(debug_filter, status, data1, data2):
 
 
 class MidiInSink:
-    def __init__(self, port_name, debug=False):
+    """Opens a Windows MIDI input port (Bitwig's outbound/controller port).
+
+    If forward_host is given, incoming messages are relayed via UDP to the WSL
+    bridge's LED control listener instead of being discarded -- this is the
+    Bitwig -> Pico LED feedback path. Without forward_host, messages are just
+    discarded (original behaviour), optionally printed with debug=True.
+    """
+
+    def __init__(self, port_name, debug=False, forward_host=None, forward_port=5006):
         ports = list_input_ports()
         port_id, resolved_name = find_port(port_name, ports)
         if port_id is None:
@@ -159,13 +167,21 @@ class MidiInSink:
         self._debug = debug
         self._resolved_name = resolved_name
         self._handle = wintypes.HANDLE()
+        self._forward_sock = None
+        self._forward_addr = None
+        if forward_host:
+            self._forward_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._forward_addr = (forward_host, forward_port)
 
         @ctypes.WINFUNCTYPE(None, wintypes.HANDLE, wintypes.UINT, DWORD_PTR, DWORD_PTR, DWORD_PTR)
         def midi_in_proc(_handle, msg, _instance, param1, _param2):
-            if msg != MIM_DATA or not self._debug:
+            if msg != MIM_DATA:
                 return
             status, data1, data2 = decode_midi(param1)
-            print(f"sink midi {status:02X} {data1:02X} {data2:02X}")
+            if self._debug:
+                print(f"sink midi {status:02X} {data1:02X} {data2:02X}")
+            if self._forward_sock is not None:
+                self._forward_sock.sendto(bytes((status, data1, data2)), self._forward_addr)
 
         self._callback = midi_in_proc
         rc = winmm.midiInOpen(
@@ -184,6 +200,9 @@ class MidiInSink:
             raise RuntimeError(f"midiInStart failed with code {rc}")
 
     def close(self):
+        if self._forward_sock is not None:
+            self._forward_sock.close()
+            self._forward_sock = None
         if not self._handle:
             return
         winmm.midiInStop(self._handle)
@@ -202,6 +221,12 @@ def main():
     parser.add_argument("--port", type=int, default=5005)
     parser.add_argument("--out", required=True, help="substring of the MIDI output port name")
     parser.add_argument("--sink-in", default=None, help="optional substring of the MIDI input port name to open and discard")
+    parser.add_argument(
+        "--forward-host",
+        default=None,
+        help="WSL IP to forward sink-in MIDI to (Bitwig -> Pico LED control channel). Omit to discard as before.",
+    )
+    parser.add_argument("--forward-port", type=int, default=5006, help="UDP port the WSL bridge's LED listener is bound to")
     parser.add_argument("--debug", action="store_true", help="print incoming UDP MIDI packets")
     parser.add_argument(
         "--debug-filter",
@@ -242,8 +267,16 @@ def main():
     sink = None
     try:
         if args.sink_in:
-            sink = MidiInSink(args.sink_in, debug=args.sink_debug)
-            print(f"Discarding MIDI input from {sink.resolved_name}")
+            sink = MidiInSink(
+                args.sink_in,
+                debug=args.sink_debug,
+                forward_host=args.forward_host,
+                forward_port=args.forward_port,
+            )
+            if args.forward_host:
+                print(f"Forwarding MIDI input from {sink.resolved_name} to {args.forward_host}:{args.forward_port}")
+            else:
+                print(f"Discarding MIDI input from {sink.resolved_name} (no --forward-host given)")
 
         while True:
             try:

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Open a Windows MIDI input port and discard incoming messages."""
+"""Open a Windows MIDI input port and forward (or discard) incoming messages."""
 
 import argparse
 import ctypes
 from ctypes import wintypes
 import signal
+import socket
 import sys
 import time
 
@@ -72,10 +73,22 @@ def decode_midi(word):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Open a Windows MIDI input port and discard incoming messages.")
+    parser = argparse.ArgumentParser(description="Open a Windows MIDI input port and forward (or discard) incoming messages.")
     parser.add_argument("--in", dest="port_name", required=True, help="substring of the MIDI input port name")
     parser.add_argument("--debug", action="store_true", help="print incoming MIDI packets")
+    parser.add_argument(
+        "--forward-host",
+        default=None,
+        help="WSL IP to forward incoming MIDI to (Bitwig -> Pico LED control channel). Omit to discard as before.",
+    )
+    parser.add_argument("--forward-port", type=int, default=5006, help="UDP port the WSL bridge's LED listener is bound to")
     args = parser.parse_args()
+
+    forward_sock = None
+    forward_addr = None
+    if args.forward_host:
+        forward_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        forward_addr = (args.forward_host, args.forward_port)
 
     port_id, resolved_name = find_port(args.port_name)
     if port_id is None:
@@ -95,10 +108,13 @@ def main():
 
     @ctypes.WINFUNCTYPE(None, wintypes.HANDLE, wintypes.UINT, DWORD_PTR, DWORD_PTR, DWORD_PTR)
     def midi_in_proc(_handle, msg, _instance, param1, _param2):
-        if msg != MIM_DATA or not args.debug:
+        if msg != MIM_DATA:
             return
         status, data1, data2 = decode_midi(param1)
-        print(f"midi {status:02X} {data1:02X} {data2:02X}")
+        if args.debug:
+            print(f"midi {status:02X} {data1:02X} {data2:02X}")
+        if forward_sock is not None:
+            forward_sock.sendto(bytes((status, data1, data2)), forward_addr)
 
     handle = wintypes.HANDLE()
     rc = winmm.midiInOpen(ctypes.byref(handle), port_id, ctypes.cast(midi_in_proc, ctypes.c_void_p).value, 0, CALLBACK_FUNCTION)
@@ -112,7 +128,10 @@ def main():
             print(f"ERROR: midiInStart failed with code {rc}", file=sys.stderr)
             return 1
 
-        print(f"Discarding MIDI input from [{port_id}] {resolved_name}")
+        if args.forward_host:
+            print(f"Forwarding MIDI input from [{port_id}] {resolved_name} to {args.forward_host}:{args.forward_port}")
+        else:
+            print(f"Discarding MIDI input from [{port_id}] {resolved_name} (no --forward-host given)")
         while keep_running:
             time.sleep(0.25)
         return 0
@@ -120,6 +139,8 @@ def main():
         winmm.midiInStop(handle)
         winmm.midiInReset(handle)
         winmm.midiInClose(handle)
+        if forward_sock is not None:
+            forward_sock.close()
 
 
 if __name__ == "__main__":

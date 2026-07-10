@@ -21,6 +21,11 @@ constexpr uint8_t kBreathCc = 2;
 constexpr uint8_t kRibbonCc = 21;
 constexpr uint8_t kRollCc = 74;
 constexpr uint8_t kModeButtonBaseNote = 44;
+// LED control protocol (Bitwig -> Pico): Note On, channel 16 (status 0x9F).
+// note = key/button index (0-17 main, 18-21 mode buttons), velocity = colour
+// (0=off, 1=green, 2=red, 3=orange). See docs/reference/pico-bitwig-midi.md.
+constexpr uint8_t kLedControlStatus = 0x9F;
+constexpr unsigned kLedIndexCount = 22;
 constexpr float kBreathMidiGain = 6.0f;
 constexpr float kParityBreathDeadband = 0.015f;
 constexpr float kParityBreathGain = 4.0f;
@@ -141,6 +146,125 @@ class UdpMidiOut {
     int sock_;
     sockaddr_in addr_;
 };
+
+// Non-blocking UDP listener for the reverse (Bitwig -> Pico) LED control
+// channel. Windows forwards Bitwig's outbound MIDI here instead of
+// discarding it (see tools/udp_midi_sink.py).
+class UdpMidiIn {
+   public:
+    explicit UdpMidiIn(int port) : sock_(-1) {
+        sock_ = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sock_ < 0) {
+            throw std::runtime_error("unable to create UDP listen socket");
+        }
+
+        sockaddr_in addr;
+        std::memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_port = htons(static_cast<uint16_t>(port));
+        if (bind(sock_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            close(sock_);
+            throw std::runtime_error("unable to bind UDP listen socket");
+        }
+    }
+
+    ~UdpMidiIn() {
+        if (sock_ >= 0) {
+            close(sock_);
+        }
+    }
+
+    // Drains at most one pending 3-byte MIDI message per call. Returns false
+    // if nothing was available.
+    bool poll(uint8_t msg[3]) {
+        unsigned char buf[3];
+        ssize_t rc = recv(sock_, buf, sizeof(buf), MSG_DONTWAIT);
+        if (rc != 3) {
+            return false;
+        }
+        std::memcpy(msg, buf, 3);
+        return true;
+    }
+
+   private:
+    int sock_;
+};
+
+// Tracks per-key/button LED colour and layers a transient press overlay
+// (orange while held) over a DAW-settable base colour, mirroring EigenD's own
+// pico module (light_input + status_mixer combining multiple LED sources).
+class LedState {
+   public:
+    void attach(EigenApi::Eigenharp* harp) {
+        harp_ = harp;
+    }
+
+    void setDevice(const std::string& dev) {
+        dev_ = dev;
+        for (unsigned i = 0; i < kLedIndexCount; ++i) {
+            applyIndex(i);
+        }
+    }
+
+    void clearDevice(const std::string& dev) {
+        if (dev_ == dev) {
+            dev_.clear();
+        }
+    }
+
+    void setBaseColour(unsigned index, EigenApi::Eigenharp::LedColour colour) {
+        if (index >= kLedIndexCount) return;
+        base_[index] = colour;
+        if (!pressed_[index]) {
+            applyIndex(index);
+        }
+    }
+
+    void onActive(unsigned index, bool active) {
+        if (index >= kLedIndexCount) return;
+        pressed_[index] = active;
+        if (active) {
+            setLed(index, EigenApi::Eigenharp::LED_ORANGE);
+        } else {
+            applyIndex(index);
+        }
+    }
+
+   private:
+    void applyIndex(unsigned index) {
+        setLed(index, base_[index]);
+    }
+
+    void setLed(unsigned index, EigenApi::Eigenharp::LedColour colour) {
+        if (harp_ == nullptr || dev_.empty()) return;
+        if (index < 18) {
+            harp_->setLED(dev_.c_str(), 0, index, colour);
+        } else {
+            harp_->setLED(dev_.c_str(), 1, index - 18, colour);
+        }
+    }
+
+    EigenApi::Eigenharp* harp_ = nullptr;
+    std::string dev_;
+    EigenApi::Eigenharp::LedColour base_[kLedIndexCount] = {};
+    bool pressed_[kLedIndexCount] = {false};
+};
+
+void handle_led_control(const uint8_t msg[3], LedState& led) {
+    if (msg[0] != kLedControlStatus) {
+        return;
+    }
+    const unsigned index = msg[1];
+    EigenApi::Eigenharp::LedColour colour;
+    switch (msg[2]) {
+        case 1: colour = EigenApi::Eigenharp::LED_GREEN; break;
+        case 2: colour = EigenApi::Eigenharp::LED_RED; break;
+        case 3: colour = EigenApi::Eigenharp::LED_ORANGE; break;
+        default: colour = EigenApi::Eigenharp::LED_OFF; break;
+    }
+    led.setBaseColour(index, colour);
+}
 
 class MidiBridgeImplementation {
    public:
@@ -451,8 +575,10 @@ static std::unique_ptr<MidiBridgeImplementation> make_bridge_implementation(Brid
 
 class MidiBridgeCallback : public EigenApi::LifecycleCallback, public EigenApi::Callback {
    public:
-    MidiBridgeCallback(UdpMidiOut& out, bool debug, DebugScope debug_scope, std::unique_ptr<MidiBridgeImplementation> impl)
+    MidiBridgeCallback(UdpMidiOut& out, bool debug, DebugScope debug_scope, std::unique_ptr<MidiBridgeImplementation> impl,
+                       EigenApi::Eigenharp* harp)
         : out_(out), debug_(debug), debug_scope_(debug_scope), impl_(std::move(impl)) {
+        led_.attach(harp);
     }
 
     void beginDeviceInfo() override {
@@ -467,18 +593,32 @@ class MidiBridgeCallback : public EigenApi::LifecycleCallback, public EigenApi::
 
     void connected(const char* dev, EigenApi::DeviceType dt) override {
         std::cout << "connected " << dev << " type=" << static_cast<int>(dt) << std::endl;
+        if (dt == EigenApi::PICO) {
+            led_.setDevice(dev);
+        }
     }
 
     void disconnected(const char* dev) override {
         std::cout << "disconnected " << dev << std::endl;
+        led_.clearDevice(dev);
     }
 
     void key(const char* /*dev*/, unsigned long long t, unsigned course, unsigned key, bool active, float p, float r, float y) override {
         impl_->on_key(out_, debug_, debug_scope_, t, course, key, active, p, r, y);
+        if (course == 0 && key < 18) {
+            led_.onActive(key, active);
+        }
     }
 
     void button(const char* /*dev*/, unsigned long long t, unsigned key, bool active) override {
         impl_->on_button(out_, debug_, debug_scope_, t, key, active);
+        if (key < 4) {
+            led_.onActive(18 + key, active);
+        }
+    }
+
+    void led_control(const uint8_t msg[3]) {
+        handle_led_control(msg, led_);
     }
 
     void breath(const char* /*dev*/, unsigned long long t, float val) override {
@@ -498,6 +638,7 @@ class MidiBridgeCallback : public EigenApi::LifecycleCallback, public EigenApi::
     bool debug_;
     DebugScope debug_scope_;
     std::unique_ptr<MidiBridgeImplementation> impl_;
+    LedState led_;
 };
 
 }  // namespace
@@ -510,6 +651,7 @@ int main(int argc, char** argv) {
     bool debug = false;
     BridgeModeKind mode = BridgeModeKind::Stable;
     DebugScope debug_scope = DebugScope::All;
+    int led_port = 0;  // 0 = LED control channel disabled
     if (argc >= 2) {
         host = argv[1];
     }
@@ -524,6 +666,9 @@ int main(int argc, char** argv) {
     }
     if (argc >= 6) {
         debug_scope = parse_debug_scope(argv[5]);
+    }
+    if (argc >= 7) {
+        led_port = std::atoi(argv[6]);
     }
 
     try {
@@ -550,9 +695,10 @@ int main(int argc, char** argv) {
                   << " debug=" << (debug ? 1 : 0)
                   << " mode=" << (mode == BridgeModeKind::Parity ? "parity" : "stable")
                   << " scope=" << debug_scope_name
+                  << " led_port=" << led_port
                   << std::endl;
 
-        auto* cb = new MidiBridgeCallback(out, debug, debug_scope, make_bridge_implementation(mode));
+        auto* cb = new MidiBridgeCallback(out, debug, debug_scope, make_bridge_implementation(mode), &harp);
         harp.addLifecycleCallback(cb);
         harp.addCallback(cb);
 
@@ -561,10 +707,22 @@ int main(int argc, char** argv) {
             return 1;
         }
 
+        std::unique_ptr<UdpMidiIn> led_in;
+        if (led_port > 0) {
+            led_in.reset(new UdpMidiIn(led_port));
+            std::cout << "listening for LED control on UDP " << led_port << std::endl;
+        }
+
         std::cout << "sending UDP MIDI to " << host << ":" << port
                   << " using " << cb->implementation_name() << " bridge mode" << std::endl;
         while (keep_running) {
             harp.process();
+            if (led_in) {
+                uint8_t msg[3];
+                while (led_in->poll(msg)) {
+                    cb->led_control(msg);
+                }
+            }
         }
 
         harp.stop();

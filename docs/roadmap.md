@@ -15,6 +15,8 @@ Automate comparison between EigenLite's driver directories and EigenD source, an
 ### Pico Key-Press LEDs
 Implement software LED lighting when a Pico key is pressed, matching the automatic orange-on-press behaviour that Alpha/Tau basestations provide in firmware. Already done in EigenD's pico module.
 
+Implemented at the bridge-tool level in `tools/pico_udp_midi_bridge.cpp` (`LedState`), layered under DAW-settable base colours — see `docs/reference/pico-bitwig-midi.md#led-feedback`. Still not implemented in `eigenapi/` itself, so other EigenLite consumers (MEC, ECMapper) don't get it for free; move it into `ef_pico.cpp` if that's wanted.
+
 ---
 
 ## Medium Term

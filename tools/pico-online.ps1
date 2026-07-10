@@ -2,15 +2,18 @@ param(
     [string]$BitwigInputPort = "",
     [string]$BitwigOutputPort = "",
     [int]$UdpPort = 5005,
+    [int]$LedPort = 5006,
     [string]$LoaderPath = "",
     [string]$ReceiverPath = "",
     [string]$FirmwarePath = "",
     [string]$BusId = "",
+    [string]$WslDistro = "",
     [switch]$DebugReceiver,
     [switch]$SkipFirmware,
     [switch]$SkipAttach,
     [switch]$SkipReceiver,
-    [switch]$SkipSink
+    [switch]$SkipSink,
+    [switch]$SkipLedForward
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +63,27 @@ function Find-PicoBusId {
         if ($line -match '^\s*([0-9-]+)\s+.*(2139:0101|BECA:0101|Eigenharp|Pico)') {
             return $Matches[1]
         }
+    }
+    return $null
+}
+
+function Get-WslIp([string]$Distro) {
+    $wslArgs = @()
+    if ($Distro) {
+        $wslArgs += @("-d", $Distro)
+    }
+    $wslArgs += @("hostname", "-I")
+    try {
+        $output = & wsl @wslArgs 2>&1
+    } catch {
+        return $null
+    }
+    if ($LASTEXITCODE -ne 0 -or -not $output) {
+        return $null
+    }
+    $first = ($output | Out-String).Trim().Split(" ")[0]
+    if ($first) {
+        return $first
     }
     return $null
 }
@@ -117,7 +141,7 @@ function Invoke-UsbipdCommand([string]$Arguments) {
     }
 }
 
-function Start-Receiver([string]$Receiver, [string]$PortName, [int]$PortNumber, [string]$SinkPortName, [bool]$UseSink, [bool]$UseDebug) {
+function Start-Receiver([string]$Receiver, [string]$PortName, [int]$PortNumber, [string]$SinkPortName, [bool]$UseSink, [bool]$UseDebug, [string]$ForwardHost, [int]$ForwardPort) {
     $quotedReceiver = $Receiver.Replace("'", "''")
     $quotedPortName = $PortName.Replace("'", "''")
     $pythonCmd = Resolve-PythonCommand
@@ -125,6 +149,9 @@ function Start-Receiver([string]$Receiver, [string]$PortName, [int]$PortNumber, 
     if ($UseSink) {
         $quotedSinkPortName = $SinkPortName.Replace("'", "''")
         $command = "$command --sink-in '$quotedSinkPortName'"
+        if ($ForwardHost) {
+            $command = "$command --forward-host $ForwardHost --forward-port $ForwardPort"
+        }
     }
     if ($UseDebug) {
         $command = "$command --debug"
@@ -232,10 +259,20 @@ if (-not $SkipAttach) {
 if (-not $SkipReceiver) {
     Stop-StaleReceiverProcesses
     Write-Host "Starting UDP MIDI receiver for Bitwig input port '$BitwigInputPort' on UDP $UdpPort"
-    if (-not $SkipSink) {
-        Write-Host "Also opening MIDI sink on Bitwig output port '$BitwigOutputPort'"
+
+    $wslIp = ""
+    if ((-not $SkipSink) -and (-not $SkipLedForward)) {
+        $wslIp = Get-WslIp -Distro $WslDistro
+        if ($wslIp) {
+            Write-Host "Also opening MIDI sink on Bitwig output port '$BitwigOutputPort', forwarding LED control to WSL $wslIp`:$LedPort"
+        } else {
+            Write-Host "Also opening MIDI sink on Bitwig output port '$BitwigOutputPort' (could not resolve WSL IP; LED control forwarding disabled -- pass -WslDistro or check 'wsl hostname -I')"
+        }
+    } elseif (-not $SkipSink) {
+        Write-Host "Also opening MIDI sink on Bitwig output port '$BitwigOutputPort' (LED control forwarding skipped, -SkipLedForward)"
     }
-    Start-Receiver -Receiver $ReceiverPath -PortName $BitwigInputPort -PortNumber $UdpPort -SinkPortName $BitwigOutputPort -UseSink (-not $SkipSink) -UseDebug $DebugReceiver
+
+    Start-Receiver -Receiver $ReceiverPath -PortName $BitwigInputPort -PortNumber $UdpPort -SinkPortName $BitwigOutputPort -UseSink (-not $SkipSink) -UseDebug $DebugReceiver -ForwardHost $wslIp -ForwardPort $LedPort
 }
 
 Write-Host ""
