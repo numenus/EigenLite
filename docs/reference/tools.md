@@ -2,6 +2,20 @@
 
 Two command-line tools ship alongside the library: `eigenlite-capture` (requires hardware) and `eigenlite-convert` (no hardware dependency).
 
+For Pico recovery / external bridge helpers added during debugging, also see:
+
+- `tools/pico_loader.py`
+- `tools/pico_udp_midi_bridge.cpp`
+- `tools/udp_midi_receiver.py`
+- `tools/udp_midi_sink.py`
+- `tools/pico-online.ps1`
+- `tools/pico-reset.ps1`
+- `tools/pico-online-wsl.sh`
+- `docs/reference/pico-wsl-bitwig.md`
+- `docs/reference/pico-bitwig-midi.md`
+- `docs/reference/pico-parity-roadmap.md`
+- `docs/reference/pico-parity-checklist.md`
+
 ---
 
 ## eigenlite-capture

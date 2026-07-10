@@ -1,0 +1,137 @@
+# Pico Bitwig MIDI Mapping
+
+Authoritative mapping for the current EigenLite Pico-to-Bitwig bridge.
+
+This document describes the current `stable` bridge mode.
+
+This reflects the intended stable controller behavior for using an Eigenharp Pico
+as a MIDI controller in Bitwig through:
+
+- WSL `pico-udp-midi-bridge`
+- Windows `udp_midi_receiver.py`
+- loopMIDI virtual ports
+
+## Goals
+
+- one note-on per key press
+- one note-off per key release
+- no repeated note retrigger while a key is held
+- no overlapping controller assignments
+- one clear ribbon CC
+- behavior suitable for Bitwig MIDI learn and instrument control
+- preserve a known-good bridge mode while refined parity work is developed separately
+
+## Event Mapping
+
+### Keys
+
+- key press -> MIDI Note On, channel 1
+- key release -> MIDI Note Off, channel 1
+- note number = `key + 48`
+
+### Key Pressure
+
+- per-key pressure -> Poly Aftertouch, channel 1
+- sent only when the MIDI 7-bit pressure value changes
+
+### Breath
+
+- breath -> `CC2`
+- sent only when the MIDI 7-bit value changes
+
+### Ribbon
+
+- Pico ribbon -> `CC21`
+- any Pico strip event is treated as the single user-facing ribbon control
+- sent only when the MIDI 7-bit value changes
+- when ribbon touch becomes inactive, value is sent as `0`
+
+## Transport Path
+
+```text
+Pico
+-> EigenLite in WSL
+-> pico-udp-midi-bridge
+-> UDP to Windows
+-> udp_midi_receiver.py
+-> loopMIDI input port
+-> Bitwig
+```
+
+Recommended loopMIDI layout:
+
+- `Pico In` for Pico -> Bitwig MIDI input
+- `Pico Out` for Bitwig output/controller return path if needed
+
+## Bitwig Notes
+
+- Use the loopMIDI input port as the Pico MIDI source.
+- Use `CC21` for ribbon mapping.
+- Use `CC2` for breath mapping.
+- If Bitwig wants a separate controller output port, use a second loopMIDI port rather than reusing the input port.
+
+## Runtime Mode
+
+The WSL launcher currently supports:
+
+- `stable` — the current working Bitwig-oriented mapping documented here
+- `parity` — refined EigenD-oriented controller behavior under active development
+
+Current `parity` mode work-in-progress:
+
+- breath uses an EigenD-style deadband/hold interpretation instead of the blunt stable-mode gain boost
+- key note-on is no longer immediate; it uses a debounce / short estimation / gating path modeled on EigenD's Pico key layer
+- ribbon currently remains mapped like `stable` while controller-layer parity for relative vs absolute strip behavior is designed
+
+Example:
+
+```bash
+/home/hotpo/repos/EigenLite/tools/pico-online-wsl.sh --mode stable
+```
+
+## Debug Expectations
+
+### WSL bridge debug
+
+Expected event types:
+
+- `key ...`
+- `breath ...`
+- `strip ...`
+- `gate note_on ... [parity]`
+- `gate reject ... [parity]`
+- `gate note_off ... [parity]`
+
+Focused examples:
+
+```bash
+/home/hotpo/repos/EigenLite/tools/pico-online-wsl.sh --debug --debug-scope gates --mode parity
+/home/hotpo/repos/EigenLite/tools/pico-online-wsl.sh --debug --debug-scope controls --mode parity
+```
+
+### Windows receiver debug
+
+Expected MIDI forms:
+
+- notes: `midi 9x .. ..` and `midi 8x .. ..`
+- pressure: `midi Ax .. ..`
+- breath: `midi B0 02 ..`
+- ribbon: `midi B0 15 ..`
+
+Focused examples:
+
+```powershell
+py "\\wsl.localhost\Ubuntu-26.04\home\hotpo\repos\EigenLite\tools\udp_midi_receiver.py" --out "Pico In" --sink-in "Pico Out" --port 5005 --debug --debug-filter notes
+py "\\wsl.localhost\Ubuntu-26.04\home\hotpo\repos\EigenLite\tools\udp_midi_receiver.py" --out "Pico In" --sink-in "Pico Out" --port 5005 --debug --debug-filter breath
+py "\\wsl.localhost\Ubuntu-26.04\home\hotpo\repos\EigenLite\tools\udp_midi_receiver.py" --out "Pico In" --sink-in "Pico Out" --port 5005 --debug --debug-filter ribbon
+```
+
+## Rationale
+
+Earlier bridge revisions had three problems:
+
+- repeated note-on while a key was held
+- controller spam caused by comparing raw floats instead of MIDI-byte values
+- ambiguous ribbon mapping caused by treating Pico strip indices as two separate user-facing CC controls
+
+The current mapping removes those failure modes and is the intended baseline.
