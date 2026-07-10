@@ -36,10 +36,12 @@ if(BUILD_TESTING)
         SmokeTest.cpp
         ReplayHarnessTest.cpp
         ApiContractTest.cpp
+        PicoMidiBridgeTest.cpp
     )
     target_compile_definitions(EigenLiteTests PRIVATE
         FIXTURES_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
     include_directories("${PROJECT_SOURCE_DIR}/eigenapi")
+    target_include_directories(EigenLiteTests PRIVATE "${PROJECT_SOURCE_DIR}/tools")
     target_link_libraries(EigenLiteTests PRIVATE
         eigenapi
         GTest::gtest

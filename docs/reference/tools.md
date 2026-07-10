@@ -5,7 +5,9 @@ Two command-line tools ship alongside the library: `eigenlite-capture` (requires
 For Pico recovery / external bridge helpers added during debugging, also see:
 
 - `tools/pico_loader.py`
-- `tools/pico_udp_midi_bridge.cpp`
+- `tools/pico_udp_midi_bridge.cpp` — real UDP/hardware entry point (`main`); MIDI mapping and LED logic live in `pico_midi_bridge_core.h`
+- `tools/pico_midi_bridge_core.h` — MIDI mapping (stable/parity) and LED state, decoupled from sockets/hardware so it's directly unit-testable (`tests/PicoMidiBridgeTest.cpp`)
+- `tools/pico_led_test.cpp` / `tools/pico-led-test.sh` — standalone `setLED()` sanity check
 - `tools/udp_midi_receiver.py`
 - `tools/udp_midi_sink.py`
 - `tools/pico-online.ps1`
