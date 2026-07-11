@@ -1,4 +1,11 @@
-if (SP_LIBUSB_DIR)
+if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    # Vendored prebuilt static libusb for the i686 cross build
+    # (see external/libusb-win-i686/README.md).
+    set(LIBUSB_WIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../libusb-win-i686")
+    add_library(libusb empty.c)
+    target_link_libraries(libusb "${LIBUSB_WIN_DIR}/lib/libusb-1.0.a")
+    target_include_directories(libusb SYSTEM PUBLIC "${LIBUSB_WIN_DIR}/include")
+elseif (SP_LIBUSB_DIR)
     # For debugging purposes, it's possible to include the source of libusb
     # directly into the project.
     add_library(libusb

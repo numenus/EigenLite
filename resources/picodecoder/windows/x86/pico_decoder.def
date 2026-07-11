@@ -1,0 +1,12 @@
+; Export definitions for the prebuilt 32-bit Windows pico decoder
+; (pico_decoder_1_0_0.dll, from resources/picodecoder/unsupported/).
+; Used by dlltool at configure time to generate a MinGW import library.
+; The DLL exports exactly these four undecorated cdecl symbols; note it does
+; NOT export pico_decoder_destroy (declared in pico_decoder.h but unused by
+; lib_pico).
+LIBRARY pico_decoder_1_0_0.dll
+EXPORTS
+    pico_decoder_cal
+    pico_decoder_cooked
+    pico_decoder_create
+    pico_decoder_raw

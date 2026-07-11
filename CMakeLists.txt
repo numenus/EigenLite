@@ -32,9 +32,19 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(EXECUTABLE_NAME eigenlite)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    message("windows support limited")
-    set(DISABLE_LIBUSB 1)
-    set(DISABLE_EIGENHARP 1)
+    set(EXECUTABLE_NAME eigenlite)
+    # Native Windows path: needs the vendored 32-bit libusb and the prebuilt
+    # 32-bit pico decoder DLL (see cmake/toolchain-mingw-i686.cmake). Only the
+    # i686 target is supported -- the decoder DLL is PE32 i386.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/libusb-win-i686/lib/libusb-1.0.a"
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/picodecoder/windows/x86/pico_decoder_1_0_0.dll"
+       AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86")
+        message(STATUS "windows native (i686) build enabled")
+    else()
+        message("windows support limited (need i686 target + vendored libusb + decoder dll)")
+        set(DISABLE_LIBUSB 1)
+        set(DISABLE_EIGENHARP 1)
+    endif()
 endif()
 
 
@@ -136,22 +146,29 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(googletest)
 endif()
 
-add_subdirectory(tests)
+# tests use host-processor decoder paths and POSIX-only bits; not yet
+# supported on the Windows target
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    add_subdirectory(tests)
+endif()
 
 if(NOT DISABLE_EIGENHARP)
-    add_executable(eigenlite-capture tools/capture/capture_main.cpp)
-    target_include_directories(eigenlite-capture PRIVATE eigenapi eigenapi/src)
-    target_link_libraries(eigenlite-capture PRIVATE eigenapi)
-    if(USE_DYNAMIC)
-        target_link_libraries(eigenlite-capture PRIVATE picodecoder)
-    else()
-        target_link_libraries(eigenlite-capture PRIVATE picodecoder_static)
-    endif()
-    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-        target_link_libraries(eigenlite-capture PRIVATE
-            "-framework CoreServices -framework CoreFoundation -framework IOKit -framework CoreAudio")
-    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        target_link_libraries(eigenlite-capture PRIVATE libusb dl pthread)
+    # capture TUI is ANSI/POSIX-terminal based; not built for Windows yet
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        add_executable(eigenlite-capture tools/capture/capture_main.cpp)
+        target_include_directories(eigenlite-capture PRIVATE eigenapi eigenapi/src)
+        target_link_libraries(eigenlite-capture PRIVATE eigenapi)
+        if(USE_DYNAMIC)
+            target_link_libraries(eigenlite-capture PRIVATE picodecoder)
+        else()
+            target_link_libraries(eigenlite-capture PRIVATE picodecoder_static)
+        endif()
+        if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+            target_link_libraries(eigenlite-capture PRIVATE
+                "-framework CoreServices -framework CoreFoundation -framework IOKit -framework CoreAudio")
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            target_link_libraries(eigenlite-capture PRIVATE libusb dl pthread)
+        endif()
     endif()
 
     add_executable(pico-udp-midi-bridge tools/pico_udp_midi_bridge.cpp)
@@ -167,6 +184,8 @@ if(NOT DISABLE_EIGENHARP)
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         target_link_libraries(pico-udp-midi-bridge PRIVATE
             "-framework CoreServices -framework CoreFoundation -framework IOKit -framework CoreAudio")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(pico-udp-midi-bridge PRIVATE libusb ws2_32)
     endif()
 
     add_executable(pico-led-test tools/pico_led_test.cpp)
@@ -182,6 +201,8 @@ if(NOT DISABLE_EIGENHARP)
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         target_link_libraries(pico-led-test PRIVATE
             "-framework CoreServices -framework CoreFoundation -framework IOKit -framework CoreAudio")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(pico-led-test PRIVATE libusb ws2_32)
     endif()
 endif()
 

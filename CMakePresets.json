@@ -35,6 +35,19 @@
       }
     },
     {
+      "name": "win-native",
+      "displayName": "Windows native (MinGW i686 cross)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-win-native",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-mingw-i686.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "USE_DYNAMIC": "ON",
+        "BUILD_TESTING": "OFF",
+        "EIGENLITE_BUILD_TESTS": "OFF"
+      }
+    },
+    {
       "name": "bela-debug",
       "displayName": "BELA Debug",
       "generator": "Unix Makefiles",
@@ -112,6 +125,11 @@
     {
       "name": "release",
       "configurePreset": "release",
+      "jobs": 8
+    },
+    {
+      "name": "win-native",
+      "configurePreset": "win-native",
       "jobs": 8
     },
     {

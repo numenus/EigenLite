@@ -97,11 +97,13 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         picross/src/pic_usb_linux.cpp
         picross/src/pic_tool_linux.cpp)
 elseif(WIN32)
+    # pic_usb_linux.cpp is a pure libusb-1.0 backend despite the name; it is
+    # the Windows USB implementation too (over WinUSB/libusbK drivers).
+    # pic_usb_win32.cpp targets EigenD's defunct kernel driver -- unusable on
+    # modern Windows. pic_tool_win32/pic_winloop are unused by EigenLite.
     set(EIGENHARP_SRC ${EIGENHARP_SRC}
         picross/src/pic_thread_win32.cpp
-        picross/src/pic_usb_win32.cpp
-        picross/src/pic_winloop.cpp
-        picross/src/pic_tool_win32.cpp)
+        picross/src/pic_usb_linux.cpp)
 endif()
 
 
@@ -127,6 +129,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     target_link_libraries(eigenapi "-framework Cocoa  -framework IOKit -framework CoreAudio")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(eigenapi "libusb" "pthread")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    # ws2_32: pic_windows.h pulls in winsock headers; shell32/ole32:
+    # SHGetFolderPath in pic_resources.cpp
+    target_link_libraries(eigenapi "libusb" "ws2_32" "shell32" "ole32")
 endif()
 
 
@@ -137,7 +143,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PICODECODER_DIR "${PICODECODER_DIR}/linux/${CMAKE_HOST_SYSTEM_PROCESSOR}")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    set(PICODECODER_DIR "${PICODECODER_DIR}/windows/${CMAKE_HOST_SYSTEM_PROCESSOR}")
+    # only a 32-bit decoder DLL exists for Windows; the whole build is i686
+    set(PICODECODER_DIR "${PICODECODER_DIR}/windows/x86")
 else()
     set(PICODECODER_DIR "${PICODECODER_DIR}/unknown/${CMAKE_HOST_SYSTEM_PROCESSOR}")
 endif()
@@ -148,7 +155,29 @@ if(USE_DUMMY_PICO)
 elseif(USE_DYNAMIC)
     message("using dynamic PICODECODER_DIR : ${PICODECODER_DIR}")
     add_library(picodecoder SHARED IMPORTED GLOBAL)
-    set_target_properties(picodecoder PROPERTIES IMPORTED_LOCATION "${PICODECODER_DIR}/libpicodecoder.so")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        # generate a MinGW import library for the prebuilt decoder DLL from
+        # the committed .def (4 undecorated cdecl exports)
+        find_program(PICODECODER_DLLTOOL NAMES i686-w64-mingw32-dlltool dlltool)
+        if(NOT PICODECODER_DLLTOOL)
+            message(FATAL_ERROR "dlltool not found (install mingw-w64 binutils)")
+        endif()
+        set(PICODECODER_IMPLIB "${CMAKE_BINARY_DIR}/libpico_decoder.a")
+        execute_process(
+            COMMAND "${PICODECODER_DLLTOOL}"
+                -d "${PICODECODER_DIR}/pico_decoder.def"
+                -l "${PICODECODER_IMPLIB}"
+                -D pico_decoder_1_0_0.dll
+            RESULT_VARIABLE PICODECODER_DLLTOOL_RC)
+        if(NOT PICODECODER_DLLTOOL_RC EQUAL 0)
+            message(FATAL_ERROR "dlltool failed generating decoder import library")
+        endif()
+        set_target_properties(picodecoder PROPERTIES
+            IMPORTED_LOCATION "${PICODECODER_DIR}/pico_decoder_1_0_0.dll"
+            IMPORTED_IMPLIB "${PICODECODER_IMPLIB}")
+    else()
+        set_target_properties(picodecoder PROPERTIES IMPORTED_LOCATION "${PICODECODER_DIR}/libpicodecoder.so")
+    endif()
     target_link_libraries(eigenapi picodecoder)
 else()
     message("using static PICODECODER_DIR : ${PICODECODER_DIR}")

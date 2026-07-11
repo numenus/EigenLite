@@ -1,10 +1,15 @@
 #include "pico_midi_bridge_core.h"
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
+#include <signal.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -15,6 +20,64 @@
 
 namespace {
 
+// Minimal portability layer over BSD sockets vs winsock. Behaviour is
+// identical; on Windows non-blocking recv needs FIONBIO on the socket since
+// there is no MSG_DONTWAIT flag.
+#ifdef _WIN32
+using socket_t = SOCKET;
+const socket_t kInvalidSocket = INVALID_SOCKET;
+
+void close_socket(socket_t s) {
+    closesocket(s);
+}
+
+bool set_nonblocking(socket_t s) {
+    u_long enabled = 1;
+    return ioctlsocket(s, FIONBIO, &enabled) == 0;
+}
+
+int recv_nonblocking(socket_t s, unsigned char* buf, int len) {
+    return recv(s, reinterpret_cast<char*>(buf), len, 0);
+}
+
+int send_udp(socket_t s, const unsigned char* buf, int len, const sockaddr_in& addr) {
+    return sendto(s, reinterpret_cast<const char*>(buf), len, 0,
+                  reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+}
+
+struct WinsockInit {
+    WinsockInit() {
+        WSADATA data;
+        if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
+            throw std::runtime_error("WSAStartup failed");
+        }
+    }
+    ~WinsockInit() { WSACleanup(); }
+};
+#else
+using socket_t = int;
+const socket_t kInvalidSocket = -1;
+
+void close_socket(socket_t s) {
+    close(s);
+}
+
+bool set_nonblocking(socket_t) {
+    return true;  // POSIX path uses MSG_DONTWAIT per-call instead
+}
+
+int recv_nonblocking(socket_t s, unsigned char* buf, int len) {
+    return static_cast<int>(recv(s, buf, len, MSG_DONTWAIT));
+}
+
+int send_udp(socket_t s, const unsigned char* buf, int len, const sockaddr_in& addr) {
+    return static_cast<int>(sendto(s, buf, len, 0,
+                                   reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)));
+}
+
+struct WinsockInit {};
+#endif
+
 volatile sig_atomic_t keep_running = 1;
 
 void int_handler(int) {
@@ -23,9 +86,9 @@ void int_handler(int) {
 
 class UdpMidiOut : public PicoBridge::MidiSink {
    public:
-    UdpMidiOut(const std::string& host, int port) : sock_(-1) {
+    UdpMidiOut(const std::string& host, int port) : sock_(kInvalidSocket) {
         sock_ = socket(AF_INET, SOCK_DGRAM, 0);
-        if (sock_ < 0) {
+        if (sock_ == kInvalidSocket) {
             throw std::runtime_error("unable to create UDP socket");
         }
 
@@ -33,27 +96,27 @@ class UdpMidiOut : public PicoBridge::MidiSink {
         addr_.sin_family = AF_INET;
         addr_.sin_port = htons(static_cast<uint16_t>(port));
         if (inet_pton(AF_INET, host.c_str(), &addr_.sin_addr) != 1) {
-            close(sock_);
+            close_socket(sock_);
             throw std::runtime_error("invalid IPv4 host");
         }
     }
 
     ~UdpMidiOut() override {
-        if (sock_ >= 0) {
-            close(sock_);
+        if (sock_ != kInvalidSocket) {
+            close_socket(sock_);
         }
     }
 
     void send3(uint8_t status, uint8_t d1, uint8_t d2) override {
         unsigned char msg[3] = {status, d1, d2};
-        ssize_t rc = sendto(sock_, msg, sizeof(msg), 0, reinterpret_cast<sockaddr*>(&addr_), sizeof(addr_));
+        int rc = send_udp(sock_, msg, sizeof(msg), addr_);
         if (rc != 3) {
-            std::cerr << "warning: UDP send failed: " << std::strerror(errno) << std::endl;
+            std::cerr << "warning: UDP send failed" << std::endl;
         }
     }
 
    private:
-    int sock_;
+    socket_t sock_;
     sockaddr_in addr_;
 };
 
@@ -62,9 +125,9 @@ class UdpMidiOut : public PicoBridge::MidiSink {
 // discarding it (see tools/udp_midi_sink.py).
 class UdpMidiIn {
    public:
-    explicit UdpMidiIn(int port) : sock_(-1) {
+    explicit UdpMidiIn(int port) : sock_(kInvalidSocket) {
         sock_ = socket(AF_INET, SOCK_DGRAM, 0);
-        if (sock_ < 0) {
+        if (sock_ == kInvalidSocket) {
             throw std::runtime_error("unable to create UDP listen socket");
         }
 
@@ -74,14 +137,18 @@ class UdpMidiIn {
         addr.sin_addr.s_addr = htonl(INADDR_ANY);
         addr.sin_port = htons(static_cast<uint16_t>(port));
         if (bind(sock_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-            close(sock_);
+            close_socket(sock_);
             throw std::runtime_error("unable to bind UDP listen socket");
+        }
+        if (!set_nonblocking(sock_)) {
+            close_socket(sock_);
+            throw std::runtime_error("unable to make UDP listen socket non-blocking");
         }
     }
 
     ~UdpMidiIn() {
-        if (sock_ >= 0) {
-            close(sock_);
+        if (sock_ != kInvalidSocket) {
+            close_socket(sock_);
         }
     }
 
@@ -89,7 +156,7 @@ class UdpMidiIn {
     // if nothing was available.
     bool poll(uint8_t msg[3]) {
         unsigned char buf[3];
-        ssize_t rc = recv(sock_, buf, sizeof(buf), MSG_DONTWAIT);
+        int rc = recv_nonblocking(sock_, buf, sizeof(buf));
         if (rc != 3) {
             return false;
         }
@@ -98,7 +165,7 @@ class UdpMidiIn {
     }
 
    private:
-    int sock_;
+    socket_t sock_;
 };
 
 }  // namespace
@@ -134,6 +201,8 @@ int main(int argc, char** argv) {
     }
 
     try {
+        WinsockInit winsock;
+        (void)winsock;
         UdpMidiOut out(host, port);
         EigenApi::FWR_Embedded fwr;
         EigenApi::Eigenharp harp(&fwr);

@@ -24,7 +24,9 @@
 #pragma message ("Hiding winnt.h #DEFINE of WRITE_RESTRICTED")
 #endif
 #define NOMINMAX		// need if we use std::minmax - removes windows #define of the same name
-#include "Ws2tcpip.h"
+// lowercase: MinGW cross-builds on case-sensitive filesystems ship ws2tcpip.h;
+// MSVC on Windows resolves either spelling
+#include "ws2tcpip.h"
 #include <windows.h>
 #ifdef __COPY_WR__
 #undef WRITE_RESTRICTED
