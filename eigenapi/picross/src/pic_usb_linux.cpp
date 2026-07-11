@@ -72,7 +72,7 @@ namespace
 		~usbpipe_out_t();
 
 		// callback from libusb
-		static void completed(libusb_transfer* transfer);
+		static void LIBUSB_CALL completed(libusb_transfer* transfer);
 		// submit buffer to usb
 		void submit(usbbuf_out_t *buf);
 
@@ -114,7 +114,7 @@ namespace
 		~usbpipe_in_t();
 
 		// callback from libusb
-		static void completed(libusb_transfer* transfer);
+		static void LIBUSB_CALL completed(libusb_transfer* transfer);
 		// submit buffer to usb
 		void submit(usbbuf_in_t *buf);
 		bool poll_pipe(unsigned long long);
@@ -291,7 +291,7 @@ void usbpipe_out_t::submit(usbbuf_out_t *buf)
 	pic::logmsg() << "usbpipe_out_t::submit failed : " << libusb_error_name(status) << " (" << status << ")";
 }
 
-void usbpipe_out_t::completed(libusb_transfer* transfer)
+void LIBUSB_CALL usbpipe_out_t::completed(libusb_transfer* transfer)
 {
 //	LOG_SINGLE(fprintf(stderr,"C"));
     usbbuf_out_t *buf = (usbbuf_out_t *)(transfer->user_data);
@@ -550,7 +550,7 @@ void usbpipe_in_t::append_receive_queue(usbbuf_in_t *buf)
     receive_queue_.append(buf);
 }
 
-void usbpipe_in_t::completed(libusb_transfer* transfer)
+void LIBUSB_CALL usbpipe_in_t::completed(libusb_transfer* transfer)
 {
     usbbuf_in_t *buf = (usbbuf_in_t *)(transfer->user_data);
     usbpipe_in_t *pipe = buf->pipe_;
@@ -1268,7 +1268,7 @@ void pic::usbenumerator_t::impl_t::thread_main()
     while(!stop_)
     {
         thread_pass();
-        sleep(1000);
+        pic_microsleep(1000UL*1000000UL); // portable 1000s sleep (was POSIX sleep(1000))
     }
 }
 

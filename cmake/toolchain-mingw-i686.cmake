@@ -32,6 +32,11 @@ set(CMAKE_RC_COMPILER "${MINGW_RC}")
 # beside system libraries is pico_decoder_1_0_0.dll (and its MSVCR90 dep).
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-static")
 
+# i686 defaults to x87 float; the thread code uses SSE denormal-flush
+# intrinsics, and every Windows-11-capable CPU has SSE2
+set(CMAKE_C_FLAGS_INIT "-msse2 -mfpmath=sse")
+set(CMAKE_CXX_FLAGS_INIT "-msse2 -mfpmath=sse")
+
 set(CMAKE_FIND_ROOT_PATH /usr/i686-w64-mingw32)
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)

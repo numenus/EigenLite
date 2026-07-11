@@ -264,7 +264,10 @@ void EF_Pico::Delegate::kbd_strip(unsigned long long t, unsigned s) {
             // s_count_ = 80;
 
             // active, until we go below threshold
-            if (s < s_threshold_ || std::abs(long(s) - s_last_) > 200) {
+            // widen both sides before subtracting: with 32-bit long the
+            // long-minus-unsigned difference converts back to unsigned and
+            // wraps (and std::abs(unsigned long) is ambiguous)
+            if (s < s_threshold_ || std::abs(static_cast<long long>(s) - static_cast<long long>(s_last_)) > 200) {
                 // possibly ending...
                 s_state_ = 3;
                 s_count_ = 80;
