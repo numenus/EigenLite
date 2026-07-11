@@ -261,7 +261,12 @@ function Invoke-PicoArm([bool]$SkipFirmwareStep, [bool]$SkipAttachStep, [string]
         Write-Host "Attaching Pico bus ID $busId to WSL"
         $bindResult = Invoke-UsbipdCommand "bind --busid $busId"
         if ($bindResult.ExitCode -ne 0) {
-            if (-not (Fail "usbipd bind failed. If bind needs elevation, rerun this PowerShell as Administrator.")) { return $null }
+            $bindText = $bindResult.Output
+            if ($bindText -match "already (bound|shared)") {
+                Write-Host "Pico bus ID $busId is already bound. Continuing."
+            } elseif (-not (Fail "usbipd bind failed: $bindText")) {
+                return $null
+            }
         }
 
         $attachResult = Invoke-UsbipdCommand "attach --wsl --busid $busId"
@@ -269,13 +274,24 @@ function Invoke-PicoArm([bool]$SkipFirmwareStep, [bool]$SkipAttachStep, [string]
             $attachText = $attachResult.Output
             if ($attachText -match "already attached to a client") {
                 Write-Host "Pico bus ID $busId is already attached to WSL. Continuing."
-            } elseif (-not (Fail "usbipd attach failed. If bind/attach needs elevation, rerun this PowerShell as Administrator.")) {
+            } elseif (-not (Fail "usbipd attach failed: $attachText")) {
                 return $null
             }
         }
     }
 
     return $busId
+}
+
+if ($StartWsl -and (-not $SkipAttach)) {
+    # usbipd attach --wsl needs a running WSL VM to attach to. wsl.exe boots
+    # the VM synchronously if it isn't up yet, so run a no-op command through
+    # it first -- otherwise a cold-boot attach fails before -StartWsl below
+    # ever launches WSL.
+    $wslBootArgs = @()
+    if ($WslDistro) { $wslBootArgs += @("-d", $WslDistro) }
+    Write-Host "Ensuring WSL is running before USB attach..."
+    & wsl.exe @wslBootArgs -e true | Out-Null
 }
 
 $BusId = Invoke-PicoArm -SkipFirmwareStep $SkipFirmware -SkipAttachStep $SkipAttach -Loader $LoaderPath -PythonCmd $pythonCmd -Firmware $FirmwarePath -InitialBusId $BusId -Quiet $false
