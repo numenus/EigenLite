@@ -35,12 +35,16 @@ exe. Windows-side Python receiver + loopMIDI stay unchanged. Branch:
 - `tools/pico-native.ps1`: receiver + exe bring-up, no usbipd/WSL/admin
 - `docs/reference/pico-native-windows.md`
 - Linux regression: build + full test suite green after all changes
+- cross-compile pass: 5 portability fixes (pic_stdint/pic_config MSVC-era
+  guards, LIBUSB_CALL callbacks, pic_microsleep, ef_pico 32-bit abs widen,
+  -msse2); exe imports = system DLLs + decoder only
+- deployed exe + decoder DLL + pico-native.ps1 to C:\fucking-windows
 
 ## Open
 
-- [ ] user: `sudo apt install g++-mingw-w64-i686-posix mingw-w64-tools`
-- [ ] first cross-compile pass (expect minor 2009-era warning/API fixes)
 - [ ] live test per docs/reference/pico-native-windows.md; known-unknowns:
       WinUSB iso-IN quality (libusbK fallback), libusb firmware self-load
+- [ ] one-time Windows setup: Zadig driver both PIDs, usbipd unbind,
+      VC++ 2008 SP1 x86 redist
 - [ ] then: mark WSL flow legacy in pico-wsl-bitwig.md, roadmap/known-issues
       cross-refs, decide default flow
