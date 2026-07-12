@@ -80,10 +80,25 @@ struct WinsockInit {};
 #endif
 
 volatile sig_atomic_t keep_running = 1;
+volatile sig_atomic_t clean_exit_done = 0;
 
 void int_handler(int) {
     keep_running = 0;
 }
+
+#ifdef _WIN32
+// window close / logoff / taskkill (non-force) arrive here, not as SIGINT.
+// A hard kill mid-stream resets the Pico (firmware drops, next start pays
+// the ~30s reload), so shut down cleanly and hold the close until the main
+// loop has stopped the harp (Windows allows ~5s after the handler returns).
+BOOL WINAPI console_ctrl_handler(DWORD /*type*/) {
+    keep_running = 0;
+    for (int i = 0; i < 40 && !clean_exit_done; ++i) {
+        Sleep(100);
+    }
+    return TRUE;
+}
+#endif
 
 void dump_foreground_pico_enumeration() {
     const std::vector<std::string> devices = EigenApi::EF_Pico::availableDevices();
@@ -217,6 +232,9 @@ int main(int argc, char** argv) {
     using namespace PicoBridge;
 
     signal(SIGINT, int_handler);
+#ifdef _WIN32
+    SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+#endif
 
     std::string host = "127.0.0.1";
     int port = 5005;
@@ -304,6 +322,7 @@ int main(int argc, char** argv) {
         }
 
         harp.stop();
+        clean_exit_done = 1;
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << std::endl;
         return 1;

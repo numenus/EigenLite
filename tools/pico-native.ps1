@@ -127,12 +127,28 @@ if ((-not $SkipSink) -and (-not $BitwigOutputPort)) {
 }
 
 # a leftover bridge instance holds the USB interface and stalls the new
-# one's connect for tens of seconds -- always clear it first
+# one's connect for tens of seconds -- always clear it first. Graceful
+# close first: a hard kill mid-stream resets the Pico and firmware drops,
+# turning the next start into a ~30s cold boot.
 $staleBridges = @(Get-Process -Name "pico-udp-midi-bridge" -ErrorAction SilentlyContinue)
 if ($staleBridges.Count -gt 0) {
     Write-Host "Stopping stale bridge process(es)"
-    $staleBridges | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 500
+    foreach ($proc in $staleBridges) {
+        & taskkill /PID $proc.Id 2>$null | Out-Null
+    }
+    $deadline = (Get-Date).AddSeconds(6)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Get-Process -Name "pico-udp-midi-bridge" -ErrorAction SilentlyContinue)) {
+            break
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    $remaining = @(Get-Process -Name "pico-udp-midi-bridge" -ErrorAction SilentlyContinue)
+    if ($remaining.Count -gt 0) {
+        Write-Host "Bridge did not close gracefully; force killing"
+        $remaining | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+    }
 }
 
 if (-not $SkipReceiver) {
