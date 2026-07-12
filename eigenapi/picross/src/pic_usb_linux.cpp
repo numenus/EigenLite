@@ -40,6 +40,24 @@
 #define ALLOCATED_URBS_READ   	    32
 
 #define URBS_PER_PIPE_WRITE         16
+
+// Process-wide libusb context, created on first use and deliberately never
+// exited: enumerate() runs several times per discovery pass and a fresh
+// libusb_init/libusb_exit per call costs ~2s each on Windows.
+static libusb_context *shared_usb_context()
+{
+    static libusb_context *ctx = []() {
+        libusb_context *c = 0;
+        if(libusb_init(&c)<0)
+        {
+            pic::logmsg() << "shared_usb_context: cannot initialise libusb";
+            return (libusb_context *)0;
+        }
+        return c;
+    }();
+    return ctx;
+}
+
 #define FRAMES_PER_URB_WRITE        8
 
 #define HISPEED_INC (1.0/8.0)
@@ -756,7 +774,8 @@ pic::usbdevice_t::impl_t::impl_t(const char *name, unsigned iface, pic::usbdevic
 	// intialise libusb, open the device and claim the interface
 	int status=0,speed=0;
 
-	if(libusb_init(&usbcontext_)<0)
+	usbcontext_ = shared_usb_context();
+	if(!usbcontext_)
     {
     	pic::logmsg() << "pic::usbdevice_t::impl_t : cannot initialise libusb for " << name;
     	return;
@@ -911,8 +930,7 @@ void pic::usbdevice_t::impl_t::set_iso_out(iso_out_pipe_t *p)
 pic::usbdevice_t::impl_t::~impl_t()
 {
     close();
-
-    libusb_exit(usbcontext_);
+    // usbcontext_ is the shared process-wide context; never exited
 }
 
 void pic::usbdevice_t::impl_t::close()
@@ -1301,8 +1319,8 @@ void pic::usbenumerator_t::stop()
 unsigned pic::usbenumerator_t::enumerate(unsigned short vendor, unsigned short product, const f_string_t &callback)
 {
 	pic::logmsg() << "pic::usbenumerator_t::enumerate : searching V " << vendor << " P " << product;
-	libusb_context* context;
-	libusb_init(&context);
+	libusb_context* context = shared_usb_context();
+	if(!context) return 0;
     int count = 0;
     libusb_device **devs;
 	ssize_t cnt = libusb_get_device_list(context, &devs);
@@ -1318,7 +1336,6 @@ unsigned pic::usbenumerator_t::enumerate(unsigned short vendor, unsigned short p
         	if (r < 0) {
         		pic::logmsg() << "pic::usbenumerator_t::enumerate : failed to get device descriptor";
         	    libusb_free_device_list(devs, 1);
-        		libusb_exit(context);
         		return 0;
         	}
         	
@@ -1355,7 +1372,6 @@ unsigned pic::usbenumerator_t::enumerate(unsigned short vendor, unsigned short p
     }
 	CATCHLOG()
     libusb_free_device_list(devs, 1);
-	libusb_exit(context);
     return count;
 }
 

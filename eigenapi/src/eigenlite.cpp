@@ -105,7 +105,9 @@ void* discoverProcess(void* pthis) {
 
 bool EigenLite::checkUsbDev() {
     if (!usbDevCheckSpinLock.test_and_set()) {
-        // any change in basestation setup?
+        // any change in basestation setup? (skipped when the device filter
+        // is pico-only: each enumerate costs ~2s on Windows)
+        if (filterAllBasePico_ == 0 || filterAllBasePico_ == 1) {
         auto baseUSBDevList = EF_BaseStation::availableDevices();
         if (availableBaseStations_.size() == baseUSBDevList.size()) {
             int i = 0;
@@ -121,8 +123,10 @@ bool EigenLite::checkUsbDev() {
             usbDevChange_ |= true;
             availableBaseStations_ = baseUSBDevList;
         }
+        }
 
         // any change in pico setup?
+        if (filterAllBasePico_ == 0 || filterAllBasePico_ == 2) {
         auto picoUSBDevList = EF_Pico::availableDevices();
         if (availablePicos_.size() == picoUSBDevList.size()) {
             int i = 0;
@@ -137,6 +141,7 @@ bool EigenLite::checkUsbDev() {
         } else {
             usbDevChange_ |= true;
             availablePicos_ = picoUSBDevList;
+        }
         }
 
         if (usbDevChange_) {

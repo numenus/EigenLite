@@ -1,5 +1,4 @@
 #include "pico_midi_bridge_core.h"
-#include "ef_harp.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -16,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <chrono>
 #include <iostream>
 #include <string>
 
@@ -100,24 +100,17 @@ BOOL WINAPI console_ctrl_handler(DWORD /*type*/) {
 }
 #endif
 
-void dump_foreground_pico_enumeration() {
-    const std::vector<std::string> devices = EigenApi::EF_Pico::availableDevices();
-    if (devices.empty()) {
-        std::cout << "foreground pico enumeration: no devices" << std::endl;
-        return;
-    }
-
-    std::cout << "foreground pico enumeration: " << devices.size() << " device(s)" << std::endl;
-    for (const auto& dev : devices) {
-        std::cout << "foreground pico device: " << dev << std::endl;
-    }
-}
-
 // EigenLite's internal (picross) log stream, filtered. Without --debug the
 // known-noise lines are dropped: per-second enumerator polling, and the
 // non-fatal isochronous "frame out of order" diagnostics (present on both
 // usbipd and native Windows; data is still processed).
 bool g_verbose_internal_logs = false;
+
+// seconds since program start, for locating startup stalls
+double uptime_seconds() {
+    static const auto start = std::chrono::steady_clock::now();
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
 
 void bridge_log_filter(const char* msg) {
     if (!g_verbose_internal_logs) {
@@ -135,11 +128,11 @@ void bridge_log_filter(const char* msg) {
             if (transfer_errors > 3 && transfer_errors % 250 != 0) {
                 return;
             }
-            std::cerr << "log:" << msg << " [x" << transfer_errors << "]" << std::endl;
+            std::cerr << "[+" << uptime_seconds() << "s] log:" << msg << " [x" << transfer_errors << "]" << std::endl;
             return;
         }
     }
-    std::cerr << "log:" << msg << std::endl;
+    std::cerr << "[+" << uptime_seconds() << "s] log:" << msg << std::endl;
 }
 
 class UdpMidiOut : public PicoBridge::MidiSink {
@@ -271,6 +264,9 @@ int main(int argc, char** argv) {
         EigenApi::FWR_Embedded fwr;
         EigenApi::Eigenharp harp(&fwr);
         harp.setPollTime(100);
+        // pico only: skips basestation scanning entirely (4 of the 6
+        // enumerate calls per discovery pass, ~2s each on Windows)
+        harp.setDeviceFilter(2, 0);
 
         const char* debug_scope_name = "all";
         switch (debug_scope) {
@@ -292,7 +288,6 @@ int main(int argc, char** argv) {
                   << " scope=" << debug_scope_name
                   << " led_port=" << led_port
                   << std::endl;
-        dump_foreground_pico_enumeration();
 
         auto* cb = new MidiBridgeCallback(out, debug, debug_scope, make_bridge_implementation(mode), &harp);
         harp.addLifecycleCallback(cb);
