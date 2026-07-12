@@ -163,10 +163,34 @@ TEST(ParityBridge, StrongPressGatesNoteOnAfterEstimationWindow) {
     for (const auto& m : sink.sent) {
         if (m.status == 0x90 && m.d1 == 48) {
             sawNoteOn = true;
-            EXPECT_EQ(m.d2, 127);  // scale_parity_key_velocity(0.5) saturates to 1.0
+            // pressure 0.5 sits ~62% into the gate..full-scale velocity range
+            EXPECT_EQ(m.d2, 98);
         }
     }
     EXPECT_TRUE(sawNoteOn) << "expected a gated note-on by the final estimation frame";
+}
+
+TEST(ParityBridge, VelocityTracksAttackPressure) {
+    // soft, medium, and hard attacks must land clearly apart -- the old x8
+    // gain saturated everything above pressure 0.125 into vel 107-127
+    const float pressures[] = {0.15f, 0.5f, 0.7f};
+    uint8_t vels[3] = {0, 0, 0};
+    for (int i = 0; i < 3; ++i) {
+        ParityMidiBridgeImplementation impl;
+        RecordingSink sink;
+        // ramp up to the target across the window: a soft press only gates
+        // via the rise check (constant pressure = rest-pressure, rejected)
+        for (unsigned long long t = 0; t < kParityEstimationFrames; ++t) {
+            const float p = pressures[i] * static_cast<float>(t + 1) / kParityEstimationFrames;
+            impl.on_key(sink, false, DebugScope::All, t, 0, 0, true, p, 0.f, 0.f);
+        }
+        for (const auto& m : sink.sent) {
+            if (m.status == 0x90 && m.d1 == 48) vels[i] = m.d2;
+        }
+        ASSERT_NE(vels[i], 0) << "no note-on for pressure " << pressures[i];
+    }
+    EXPECT_LT(vels[0] + 20, vels[1]) << "soft vs medium too close";
+    EXPECT_LT(vels[1] + 15, vels[2]) << "medium vs hard too close";
 }
 
 TEST(ParityBridge, NoNoteOnBeforeEstimationWindowCompletes) {

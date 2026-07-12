@@ -39,7 +39,11 @@ constexpr unsigned kParityEstimationFrames = 14;
 constexpr float kParityKeyGateThreshold = 300.0f / 3192.0f;
 constexpr float kParityKeyHardThreshold = 900.0f / 3192.0f;
 constexpr float kParityKeyRiseThreshold = 220.0f / 3192.0f;
-constexpr float kParityKeyVelocityGain = 8.0f;
+// velocity = where max attack pressure lands between the gate threshold
+// (-> floor velocity) and full-scale pressure (-> 127); the old x8 gain
+// saturated at pressure 0.125, compressing all play into vel 107-127
+constexpr float kParityKeyVelocityFullPressure = 0.75f;
+constexpr float kParityKeyVelocityFloor = 0.08f;  // gated notes never inaudible
 constexpr float kParityKeyVelocityCurve = 0.6f;
 
 inline unsigned to_u7(float v) {
@@ -56,11 +60,12 @@ inline float scale_breath(float v) {
 }
 
 inline float scale_parity_key_velocity(float v) {
-    v *= kParityKeyVelocityGain;
+    v = (v - kParityKeyGateThreshold) /
+        (kParityKeyVelocityFullPressure - kParityKeyGateThreshold);
     if (v < 0.0f) v = 0.0f;
     if (v > 1.0f) v = 1.0f;
     v = std::pow(v, kParityKeyVelocityCurve);
-    return v;
+    return kParityKeyVelocityFloor + v * (1.0f - kParityKeyVelocityFloor);
 }
 
 enum class BridgeModeKind {
