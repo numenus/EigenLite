@@ -126,6 +126,15 @@ if ((-not $SkipSink) -and (-not $BitwigOutputPort)) {
     throw "Pass -BitwigOutputPort (the loopMIDI port Bitwig writes, e.g. 'Pico Out'), or -SkipSink."
 }
 
+# a leftover bridge instance holds the USB interface and stalls the new
+# one's connect for tens of seconds -- always clear it first
+$staleBridges = @(Get-Process -Name "pico-udp-midi-bridge" -ErrorAction SilentlyContinue)
+if ($staleBridges.Count -gt 0) {
+    Write-Host "Stopping stale bridge process(es)"
+    $staleBridges | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+}
+
 if (-not $SkipReceiver) {
     Stop-StaleReceiverProcesses
     $pythonCmd = Resolve-PythonCommand
