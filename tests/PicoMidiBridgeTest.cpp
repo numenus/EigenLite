@@ -370,6 +370,20 @@ TEST(LedStateTest, OutOfRangeIndexIsIgnoredSafely) {
     EXPECT_TRUE(led.calls.empty());
 }
 
+TEST(DeviceFilterTest, ParsesKnownValuesAndDefaultsToPico) {
+    EXPECT_EQ(parse_device_filter(nullptr), DeviceFilterKind::Pico);
+    EXPECT_EQ(parse_device_filter("pico"), DeviceFilterKind::Pico);
+    EXPECT_EQ(parse_device_filter("all"), DeviceFilterKind::All);
+    EXPECT_EQ(parse_device_filter("base"), DeviceFilterKind::BaseStation);
+    EXPECT_EQ(parse_device_filter("alpha"), DeviceFilterKind::BaseStation);
+    EXPECT_EQ(parse_device_filter("tau"), DeviceFilterKind::BaseStation);
+    EXPECT_THROW(parse_device_filter("bogus"), std::runtime_error);
+    // values feed EigenApi::Eigenharp::setDeviceFilter directly
+    EXPECT_EQ(static_cast<unsigned>(DeviceFilterKind::All), 0u);
+    EXPECT_EQ(static_cast<unsigned>(DeviceFilterKind::BaseStation), 1u);
+    EXPECT_EQ(static_cast<unsigned>(DeviceFilterKind::Pico), 2u);
+}
+
 // --- LED control protocol parsing (Bitwig -> Pico) -------------------------
 
 TEST(LedControlTest, NoteOnChannel16SetsBaseColourByVelocityThird) {

@@ -95,6 +95,36 @@ inline BridgeModeKind parse_mode(const char* raw) {
     throw std::runtime_error("unknown bridge mode; expected stable or parity");
 }
 
+// Maps to EigenApi::Eigenharp::setDeviceFilter's first argument:
+// 0 = scan everything, 1 = basestations (Alpha/Tau) only, 2 = pico only.
+// The bridge defaults to pico-only because each USB enumerate pass costs
+// ~2s on Windows and basestation scanning doubles-plus the startup time;
+// Alpha/Tau owners pass "all".
+enum class DeviceFilterKind : unsigned {
+    All = 0,
+    BaseStation = 1,
+    Pico = 2,
+};
+
+inline DeviceFilterKind parse_device_filter(const char* raw) {
+    if (raw == nullptr) {
+        return DeviceFilterKind::Pico;
+    }
+
+    const std::string filter(raw);
+    if (filter == "pico") {
+        return DeviceFilterKind::Pico;
+    }
+    if (filter == "base" || filter == "basestation" || filter == "alpha" || filter == "tau") {
+        return DeviceFilterKind::BaseStation;
+    }
+    if (filter == "all") {
+        return DeviceFilterKind::All;
+    }
+
+    throw std::runtime_error("unknown device filter; expected pico, base, or all");
+}
+
 inline DebugScope parse_debug_scope(const char* raw) {
     if (raw == nullptr) {
         return DebugScope::All;

@@ -253,6 +253,10 @@ int main(int argc, char** argv) {
     if (argc >= 7) {
         led_port = std::atoi(argv[6]);
     }
+    DeviceFilterKind device_filter = DeviceFilterKind::Pico;
+    if (argc >= 8) {
+        device_filter = parse_device_filter(argv[7]);
+    }
 
     g_verbose_internal_logs = debug;
     EigenApi::Logger::setLogFunc(bridge_log_filter);
@@ -264,9 +268,10 @@ int main(int argc, char** argv) {
         EigenApi::FWR_Embedded fwr;
         EigenApi::Eigenharp harp(&fwr);
         harp.setPollTime(100);
-        // pico only: skips basestation scanning entirely (4 of the 6
-        // enumerate calls per discovery pass, ~2s each on Windows)
-        harp.setDeviceFilter(2, 0);
+        // pico-only default skips basestation scanning entirely (4 of the 6
+        // enumerate calls per discovery pass, ~2s each on Windows);
+        // Alpha/Tau owners pass "all" as the 8th argument
+        harp.setDeviceFilter(static_cast<unsigned>(device_filter), 0);
 
         const char* debug_scope_name = "all";
         switch (debug_scope) {
@@ -287,6 +292,10 @@ int main(int argc, char** argv) {
                   << " mode=" << (mode == BridgeModeKind::Parity ? "parity" : "stable")
                   << " scope=" << debug_scope_name
                   << " led_port=" << led_port
+                  << " device_filter="
+                  << (device_filter == DeviceFilterKind::All
+                          ? "all"
+                          : (device_filter == DeviceFilterKind::BaseStation ? "base" : "pico"))
                   << std::endl;
 
         auto* cb = new MidiBridgeCallback(out, debug, debug_scope, make_bridge_implementation(mode), &harp);

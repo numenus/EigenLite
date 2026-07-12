@@ -72,9 +72,11 @@ powershell -ExecutionPolicy Bypass -File pico-native.ps1 `
     -BitwigInputPort "Pico In" -BitwigOutputPort "Pico Out"
 ```
 
-Flags: `-Mode parity`, `-DebugBridge`, `-DebugScope gates|controls|all`,
-`-DebugReceiver`, `-SkipSink`, `-SkipLedForward`, `-BridgeExe <path>`,
-`-UdpPort`/`-LedPort`. Receiver opens in its own window; the bridge runs in
+Flags: `-Mode parity`, `-DeviceFilter pico|base|all` (default `pico` -- pass
+`all` if you also have an Alpha/Tau basestation; pico-only skips the slow
+basestation USB scans), `-DebugBridge`, `-DebugScope gates|controls|all`,
+`-DebugReceiver`, `-SinkDebug`, `-SkipSink`, `-SkipLedForward`,
+`-BridgeExe <path>`, `-UdpPort`/`-LedPort`. Receiver opens in its own window; the bridge runs in
 the invoking window (Ctrl+C to stop).
 
 ## Troubleshooting

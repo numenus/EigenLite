@@ -13,6 +13,7 @@ build_if_missing="1"
 bridge_mode="stable"
 debug_scope="all"
 led_port="5006"
+device_filter="pico"
 
 usage() {
     cat <<'EOF'
@@ -66,6 +67,10 @@ while [[ $# -gt 0 ]]; do
             bridge_mode="${2:-}"
             shift 2
             ;;
+        --device-filter)
+            device_filter="${2:-pico}"
+            shift 2
+            ;;
         --led-port)
             led_port="${2:-}"
             shift 2
@@ -109,4 +114,4 @@ fi
 export LD_LIBRARY_PATH="$PICODECODER_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 echo "Starting Pico bridge to $host_ip:$udp_port using mode '$bridge_mode' debug-scope '$debug_scope' led-port '$led_port'"
-exec sudo env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" "$BRIDGE_BIN" "$host_ip" "$udp_port" "$debug" "$bridge_mode" "$debug_scope" "$led_port"
+exec sudo env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" "$BRIDGE_BIN" "$host_ip" "$udp_port" "$debug" "$bridge_mode" "$debug_scope" "$led_port" "$device_filter"

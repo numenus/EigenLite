@@ -25,6 +25,7 @@ param(
     [string]$BridgeExe = "",
     [string]$ReceiverPath = "",
     [string]$Mode = "stable",
+    [string]$DeviceFilter = "pico",
     [string]$DebugScope = "all",
     [switch]$DebugBridge,
     [switch]$DebugReceiver,
@@ -183,7 +184,7 @@ if ($DebugBridge) {
     $debugFlag = 1
 }
 
-Write-Host "Starting native bridge: $BridgeExe 127.0.0.1 $UdpPort $debugFlag $Mode $DebugScope $bridgeLedPort"
+Write-Host "Starting native bridge: $BridgeExe 127.0.0.1 $UdpPort $debugFlag $Mode $DebugScope $bridgeLedPort $DeviceFilter"
 Write-Host "(Ctrl+C stops it; the receiver window stays up for reuse)"
 
 # The EigenD-era USB teardown can crash the bridge when the Pico is
@@ -193,7 +194,7 @@ Write-Host "(Ctrl+C stops it; the receiver window stays up for reuse)"
 $fastFailures = 0
 while ($true) {
     $startedAt = Get-Date
-    & $BridgeExe 127.0.0.1 $UdpPort $debugFlag $Mode $DebugScope $bridgeLedPort
+    & $BridgeExe 127.0.0.1 $UdpPort $debugFlag $Mode $DebugScope $bridgeLedPort $DeviceFilter
     $exitCode = $LASTEXITCODE
     if ($exitCode -eq 0) {
         break
