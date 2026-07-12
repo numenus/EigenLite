@@ -4,22 +4,26 @@ Active limitations and deferred work. Sourced from code analysis and `docs/archi
 
 ---
 
-## Windows-Side Bridge Features Not Yet Live-Tested
+## Native Bridge: Unplug-While-Running May Crash After Reconnect Attempt
 
-Written and code-reviewed on the WSL/Linux side (build passes, unit tests
-pass), but the Windows-only halves cannot be exercised without a real
-Windows + Bitwig + Pico session:
+Live-observed 2026-07-12 (native Windows): unplugging the Pico while the
+bridge runs floods failed-transfer callbacks from the dead device; the
+subsequent auto-reconnect (firmware load) raced with that teardown and the
+process eventually died silently. Mitigations landed: dead devices are now
+destroyed before new connects in `EigenLite::poll()` (`eigenlite.cpp`), and
+the bridge log filter throttles the flood. The underlying teardown race in
+the EigenD-era USB code is NOT fully fixed — treat live replug as
+best-effort. Workaround: restart `pico-native.ps1` after replugging
+(~5s warm, ~40s if firmware reloads). Accepted as QoL-only.
 
-- LED control forwarding: `udp_midi_receiver.py --forward-host` /
-  `udp_midi_sink.py --forward-host` (Bitwig -> Pico LED channel)
-- `pico-online.ps1 -StartWsl` (single-command bring-up, invokes the WSL
-  bridge via `wsl.exe`)
-- `pico-online.ps1 -Watch` (auto re-arm on unplug/replug via USB-state
-  polling)
+## WSL-Flow Features Not Live-Tested (now legacy path)
 
-Run through `docs/reference/pico-parity-checklist.md`'s LED section and the
-reconnect scenario in `docs/reference/pico-wsl-bitwig.md` before relying on
-these day to day.
+The WSL chain is superseded by the native bridge
+(`docs/reference/pico-native-windows.md`); these were never live-tested and
+remain so: `pico-online.ps1 -StartWsl`, `-Watch`, and WSL-targeted LED
+forwarding. The LED control channel itself IS validated (natively,
+2026-07-12): Bitwig HW Instrument ch16 -> `udp_midi_receiver.py` sink
+forward -> bridge -> key LEDs.
 
 ---
 

@@ -293,6 +293,28 @@ bool EigenLite::connectNewPico() {
 
 
 bool EigenLite::poll() {
+    // destroy dead devices FIRST: connecting a replacement can block for
+    // ~30s (firmware load), and a dead device left alive that whole time
+    // floods failed-transfer callbacks and races the new connect
+    while (deadDevices_.size() > 0) {
+        std::string usbname = *deadDevices_.begin();
+
+        std::vector<EF_Harp*>::iterator iter;
+        bool found = false;
+        for (iter = devices_.begin(); !found && iter != devices_.end(); iter++) {
+            EF_Harp* pDevice = *iter;
+            if (pDevice->name() == usbname) {
+                char logbuf[100];
+                snprintf(logbuf, 100, "destroy device %s", usbname.c_str());
+                logmsg(logbuf);
+                pDevice->destroy();
+                found = true;
+                devices_.erase(iter);
+            }
+        }
+        deadDevices_.erase(usbname);
+    }
+
     // check for device changes
     if (!usbDevCheckSpinLock.test_and_set()) {
         if (usbDevChange_) {
@@ -335,26 +357,6 @@ bool EigenLite::poll() {
         }  // usbDevChange_
         usbDevCheckSpinLock.clear();
     }  // usbDevCheckSpinLock - test n' set, else just wait till next time!
-
-    // check for dead devices
-    while (deadDevices_.size() > 0) {
-        std::string usbname = *deadDevices_.begin();
-
-        std::vector<EF_Harp*>::iterator iter;
-        bool found = false;
-        for (iter = devices_.begin(); !found && iter != devices_.end(); iter++) {
-            EF_Harp* pDevice = *iter;
-            if (pDevice->name() == usbname) {
-                char logbuf[100];
-                snprintf(logbuf, 100, "destroy device %s", usbname.c_str());
-                logmsg(logbuf);
-                pDevice->destroy();
-                found = true;
-                devices_.erase(iter);
-            }
-        }
-        deadDevices_.erase(usbname);
-    }
 
     // poll each device
     long long t = pic_microtime();

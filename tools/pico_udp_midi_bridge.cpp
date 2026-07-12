@@ -112,6 +112,17 @@ void bridge_log_filter(const char* msg) {
             std::strstr(msg, "availableDevices found") != nullptr) {
             return;
         }
+        // an unplugged device floods failed-transfer callbacks until it is
+        // torn down; print the first few then sample
+        if (std::strstr(msg, "completed unsuccessful") != nullptr) {
+            static unsigned long transfer_errors = 0;
+            ++transfer_errors;
+            if (transfer_errors > 3 && transfer_errors % 250 != 0) {
+                return;
+            }
+            std::cerr << "log:" << msg << " [x" << transfer_errors << "]" << std::endl;
+            return;
+        }
     }
     std::cerr << "log:" << msg << std::endl;
 }
