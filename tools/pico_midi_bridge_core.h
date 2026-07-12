@@ -22,10 +22,13 @@ constexpr uint8_t kRibbonCc = 21;
 constexpr uint8_t kRibbonRelativeCc = 22;
 constexpr uint8_t kRollCc = 74;
 constexpr uint8_t kModeButtonBaseNote = 44;
-// LED control protocol (Bitwig -> Pico): Note On, channel 16 (status 0x9F).
-// note = key/button index (0-17 main, 18-21 mode buttons), velocity = colour
-// (0=off, 1=green, 2=red, 3=orange). See docs/reference/pico-bitwig-midi.md.
+// LED control protocol (Bitwig -> Pico), channel 16:
+// Note On (0x9F): note = key/button index (0-17 main, 18-21 mode buttons),
+// velocity picks the colour by thirds (0=off, 1-42 green, 43-84 red,
+// 85-127 orange). Note Off (0x8F) clears the key, so LEDs simply follow
+// held/sequenced DAW notes. See docs/reference/pico-bitwig-midi.md.
 constexpr uint8_t kLedControlStatus = 0x9F;
+constexpr uint8_t kLedControlOffStatus = 0x8F;
 constexpr unsigned kLedIndexCount = 22;
 constexpr float kBreathMidiGain = 6.0f;
 constexpr float kParityBreathDeadband = 0.015f;
@@ -190,16 +193,23 @@ class LedState {
 };
 
 inline void handle_led_control(const uint8_t msg[3], LedState& led) {
+    const unsigned index = msg[1];
+    if (msg[0] == kLedControlOffStatus) {
+        led.setBaseColour(index, EigenApi::Eigenharp::LED_OFF);
+        return;
+    }
     if (msg[0] != kLedControlStatus) {
         return;
     }
-    const unsigned index = msg[1];
     EigenApi::Eigenharp::LedColour colour;
-    switch (msg[2]) {
-        case 1: colour = EigenApi::Eigenharp::LED_GREEN; break;
-        case 2: colour = EigenApi::Eigenharp::LED_RED; break;
-        case 3: colour = EigenApi::Eigenharp::LED_ORANGE; break;
-        default: colour = EigenApi::Eigenharp::LED_OFF; break;
+    if (msg[2] == 0) {
+        colour = EigenApi::Eigenharp::LED_OFF;  // Note On vel 0 == note off
+    } else if (msg[2] <= 42) {
+        colour = EigenApi::Eigenharp::LED_GREEN;
+    } else if (msg[2] <= 84) {
+        colour = EigenApi::Eigenharp::LED_RED;
+    } else {
+        colour = EigenApi::Eigenharp::LED_ORANGE;
     }
     led.setBaseColour(index, colour);
 }

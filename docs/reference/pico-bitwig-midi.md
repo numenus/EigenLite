@@ -85,11 +85,16 @@ transient press overlay on top.
 
 ### Bitwig -> Pico LED control
 
-- dedicated MIDI channel 16, Note On (status `0x9F`)
-- note = key/button index: `0-17` main keys, `18-21` mode buttons
-- velocity = colour: `0`=off, `1`=green, `2`=red, `3`=orange
+- dedicated MIDI channel 16
+- Note On (status `0x9F`): note = key/button index (`0-17` main keys, `18-21`
+  mode buttons), velocity picks the colour by thirds:
+  `0`=off, `1-42`=green, `43-84`=red, `85-127`=orange
+- Note Off (status `0x8F`, what a DAW sends when a clip note ends) clears the
+  key -- so LEDs simply follow held/sequenced notes on channel 16
 - sets that key's base colour; applied immediately unless the key is currently
   held, in which case it's applied on release
+- in Bitwig: HW Instrument device on a track, MIDI out = "Pico Out",
+  channel = 16; notes C-2..F-1 are keys 0-17, F#-1..A-1 the mode buttons
 
 ### Transport
 

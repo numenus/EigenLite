@@ -348,18 +348,28 @@ TEST(LedStateTest, OutOfRangeIndexIsIgnoredSafely) {
 
 // --- LED control protocol parsing (Bitwig -> Pico) -------------------------
 
-TEST(LedControlTest, NoteOnChannel16SetsBaseColour) {
+TEST(LedControlTest, NoteOnChannel16SetsBaseColourByVelocityThird) {
     RecordingLedState led;
     led.setDevice("pico-1");
-    led.calls.clear();
 
-    const uint8_t msg[3] = {kLedControlStatus, 5, 3};  // index 5, velocity 3 = orange
-    handle_led_control(msg, led);
-
-    ASSERT_EQ(led.calls.size(), 1u);
-    EXPECT_EQ(led.calls[0].course, 0u);
-    EXPECT_EQ(led.calls[0].key, 5u);
-    EXPECT_EQ(led.calls[0].colour, EigenApi::Eigenharp::LED_ORANGE);
+    struct Case { uint8_t vel; EigenApi::Eigenharp::LedColour colour; };
+    const Case cases[] = {
+        {1, EigenApi::Eigenharp::LED_GREEN},
+        {42, EigenApi::Eigenharp::LED_GREEN},
+        {43, EigenApi::Eigenharp::LED_RED},
+        {84, EigenApi::Eigenharp::LED_RED},
+        {85, EigenApi::Eigenharp::LED_ORANGE},
+        {127, EigenApi::Eigenharp::LED_ORANGE},
+    };
+    for (const Case& c : cases) {
+        led.calls.clear();
+        const uint8_t msg[3] = {kLedControlStatus, 5, c.vel};
+        handle_led_control(msg, led);
+        ASSERT_EQ(led.calls.size(), 1u) << "velocity " << int(c.vel);
+        EXPECT_EQ(led.calls[0].course, 0u);
+        EXPECT_EQ(led.calls[0].key, 5u);
+        EXPECT_EQ(led.calls[0].colour, c.colour) << "velocity " << int(c.vel);
+    }
 }
 
 TEST(LedControlTest, WrongStatusByteIsIgnored) {
@@ -373,12 +383,27 @@ TEST(LedControlTest, WrongStatusByteIsIgnored) {
     EXPECT_TRUE(led.calls.empty());
 }
 
-TEST(LedControlTest, UnrecognisedVelocityDefaultsToOff) {
+TEST(LedControlTest, NoteOffChannel16ClearsKey) {
     RecordingLedState led;
     led.setDevice("pico-1");
     led.calls.clear();
 
-    const uint8_t msg[3] = {kLedControlStatus, 0, 99};
+    const uint8_t on[3] = {kLedControlStatus, 7, 100};
+    handle_led_control(on, led);
+    const uint8_t off[3] = {kLedControlOffStatus, 7, 64};  // DAW note end
+    handle_led_control(off, led);
+
+    ASSERT_EQ(led.calls.size(), 2u);
+    EXPECT_EQ(led.calls[1].key, 7u);
+    EXPECT_EQ(led.calls[1].colour, EigenApi::Eigenharp::LED_OFF);
+}
+
+TEST(LedControlTest, NoteOnVelocityZeroClears) {
+    RecordingLedState led;
+    led.setDevice("pico-1");
+    led.calls.clear();
+
+    const uint8_t msg[3] = {kLedControlStatus, 0, 0};  // running-status note off
     handle_led_control(msg, led);
 
     ASSERT_EQ(led.calls.size(), 1u);
