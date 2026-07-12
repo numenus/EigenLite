@@ -46,7 +46,8 @@ bool EF_Pico::create(const std::string &usbdev) {
         usbDevice()->close();
         logmsg("create pico loop");
         pLoop_ = new pico::active_t(usbDevice()->name(), &delegate_);
-        pLoop_->load_calibration_from_device();
+        // calibration is read in start() right after; reading it here too
+        // doubled the (slow, low-speed-USB) startup readback
         logmsg("created pico loop");
 
     } catch (pic::error &e) {
