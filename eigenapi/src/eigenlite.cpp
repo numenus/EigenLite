@@ -87,30 +87,18 @@ void EigenLite::clearLifecycleCallbacks() {
 volatile bool discoverProcessRun = true;
 
 void* discoverProcess(void* pthis) {
-    // raw stderr on purpose: proves the thread body runs even if the
-    // TLS-based pic logging path is itself broken on this platform
-    fprintf(stderr, "raw: discover thread entered\n");
-    fflush(stderr);
     auto pThis = static_cast<EigenLite*>(pthis);
-    unsigned long spinMisses = 0;
     while (discoverProcessRun) {
         if (pThis->checkUsbDev()) {
-            spinMisses = 0;
             // 10seconds
             pic_microsleep(10 * 100000);
         } else {
             // failed as poll() in progress
             // try again quickly, spinlock
             // 1 mS
-            if (++spinMisses % 5000 == 1) {
-                fprintf(stderr, "raw: discover spinlock misses=%lu\n", spinMisses);
-                fflush(stderr);
-            }
             pic_microsleep(1000);
         }
     }
-    fprintf(stderr, "raw: discover thread exiting\n");
-    fflush(stderr);
     return nullptr;
 }
 
@@ -150,12 +138,11 @@ bool EigenLite::checkUsbDev() {
             availablePicos_ = picoUSBDevList;
         }
 
-        {
+        if (usbDevChange_) {
             char buf[256];
-            snprintf(buf, sizeof(buf), "checkUsbDev: %u pico device(s), %u basestation device(s), changed=%u",
+            snprintf(buf, sizeof(buf), "checkUsbDev: %u pico device(s), %u basestation device(s)",
                      static_cast<unsigned>(availablePicos_.size()),
-                     static_cast<unsigned>(availableBaseStations_.size()),
-                     usbDevChange_ ? 1U : 0U);
+                     static_cast<unsigned>(availableBaseStations_.size()));
             logmsg(buf);
         }
 
@@ -177,8 +164,6 @@ bool EigenLite::create() {
     pic_init_time();
     discoverProcessRun = true;
     discoverThread_ = std::thread(discoverProcess, this);
-    fprintf(stderr, "raw: discover thread launched\n");
-    fflush(stderr);
     pic_set_foreground(true);
     lastPollTime_ = 0;
     usbDevChange_ = false;

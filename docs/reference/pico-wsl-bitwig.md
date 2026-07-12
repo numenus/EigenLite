@@ -1,5 +1,10 @@
 # Eigenharp Pico on Windows, WSL, and Bitwig
 
+> **Legacy/fallback path.** As of 2026-07-11 the native Windows bridge
+> (`pico-native-windows.md`) runs the Pico without WSL, usbipd, or an admin
+> shell, and is the preferred daily flow. Keep this runbook for fallback and
+> for the usbipd-specific troubleshooting knowledge.
+
 Practical runbook for using an Eigenharp Pico that:
 
 - powers up in pre-load mode on Windows

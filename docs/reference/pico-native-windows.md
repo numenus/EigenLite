@@ -1,7 +1,15 @@
 # Pico -> Bitwig, Native Windows 11 (no WSL)
 
-Status: **built cross-compiled, not yet live-tested on hardware.** The WSL
-chain (`pico-wsl-bitwig.md`) remains the known-good fallback.
+Status: **live-validated 2026-07-11** — enumeration, firmware self-load, iso
+input, and key play into loopMIDI all work natively (over the libusb-win32
+driver; WinUSB/libusbK untested but expected fine). Still pending live checks:
+LED control path from Bitwig, parity mode feel, cold-replug auto-reconnect,
+latency comparison. The WSL chain (`pico-wsl-bitwig.md`) remains as fallback.
+
+Two cross-platform EigenLite bugs were found and fixed during bring-up (both
+latent on Linux, fatal on Windows): an uninitialised `std::atomic_flag`
+deadlocking USB discovery, and post-firmware rediscovery matching the stale
+pre-load device name. Candidates for upstreaming to TheTechnobear/EigenLite.
 
 ## Architecture
 
@@ -80,9 +88,11 @@ the invoking window (Ctrl+C to stop).
 | firmware never loads from cold plug | pre-load PID lacks WinUSB driver; or fall back to `pico_loader.py` then rerun |
 | notes work, LEDs don't | receiver started without `--forward-host/--forward-port` (check `-SkipLedForward` not set) |
 
-## Known-unknowns (pending first live run)
+## Validation log
 
-- WinUSB isochronous-IN quality on this hardware (libusbK is the fallback).
-- Self-serve firmware load over libusb control transfers on Windows.
-- Whether `fwr_posix`-style paths matter (they don't — embedded firmware reader
-  is used).
+- 2026-07-11: first full native session. Confirmed working: enumeration
+  (libusb-win32/libusb0 driver), firmware self-load from pre-load state
+  (`2139:0001` -> `2139:0101`, no `pico_loader.py`), iso input pipes, key
+  events to loopMIDI. Not yet exercised live: Bitwig LED control path, parity
+  mode, cold-replug auto-reconnect (code path fixed but untested), latency
+  vs the WSL chain.

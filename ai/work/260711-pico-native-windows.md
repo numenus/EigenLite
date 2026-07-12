@@ -40,11 +40,27 @@ exe. Windows-side Python receiver + loopMIDI stay unchanged. Branch:
   -msse2); exe imports = system DLLs + decoder only
 - deployed exe + decoder DLL + pico-native.ps1 to C:\fucking-windows
 
+## Live bring-up findings (2026-07-11)
+
+Two latent cross-platform EigenLite bugs, fatal on Windows, fixed here —
+**upstream PR candidates** (TheTechnobear/EigenLite):
+
+1. `eigenlite_impl.h`: `std::atomic_flag usbDevCheckSpinLock` uninitialised;
+   pre-C++20 initial state unspecified, starts SET under MinGW -> USB
+   discovery deadlocked forever (clear() only runs after successful acquire).
+2. `EF_Pico::checkFirmware`: post-firmware re-find matched the pre-load
+   device name; libusb names embed product+address, both change on
+   re-enumeration -> never matched. Now accepts any post-load pico and
+   returns the new name to create().
+
+Diagnosis trail: standalone usb_diag.exe proved libusb+threads fine ->
+raw-fprintf instrumentation proved discover thread ran but spinlock never
+acquired -> flag init. Validated natively: enumeration, firmware self-load
+(no pico_loader.py), iso input over libusb-win32 driver, keys -> loopMIDI.
+
 ## Open
 
-- [ ] live test per docs/reference/pico-native-windows.md; known-unknowns:
-      WinUSB iso-IN quality (libusbK fallback), libusb firmware self-load
-- [ ] one-time Windows setup: Zadig driver both PIDs, usbipd unbind,
-      VC++ 2008 SP1 x86 redist
-- [ ] then: mark WSL flow legacy in pico-wsl-bitwig.md, roadmap/known-issues
-      cross-refs, decide default flow
+- [ ] live: Bitwig LED control path, parity mode, cold-replug auto-reconnect
+      (fixed code path untested), latency vs WSL chain
+- [ ] consider upstreaming the two fixes
+- [ ] roadmap cross-ref + close-out once remaining live checks pass
