@@ -87,6 +87,7 @@ void EigenLite::clearLifecycleCallbacks() {
 volatile bool discoverProcessRun = true;
 
 void* discoverProcess(void* pthis) {
+    Logger::registerCurrentThread();
     auto pThis = static_cast<EigenLite*>(pthis);
     while (discoverProcessRun) {
         if (pThis->checkUsbDev()) {

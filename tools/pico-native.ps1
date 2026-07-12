@@ -28,6 +28,7 @@ param(
     [string]$DebugScope = "all",
     [switch]$DebugBridge,
     [switch]$DebugReceiver,
+    [switch]$SinkDebug,
     [switch]$SkipReceiver,
     [switch]$SkipSink,
     [switch]$SkipLedForward
@@ -140,6 +141,9 @@ if (-not $SkipReceiver) {
     }
     if ($DebugReceiver) {
         $command = "$command --debug"
+    }
+    if ($SinkDebug) {
+        $command = "$command --sink-debug"
     }
     Write-Host "Starting UDP MIDI receiver for '$BitwigInputPort' on UDP $UdpPort"
     Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoExit", "-Command", $command) | Out-Null

@@ -125,6 +125,9 @@ class Logger {
 public:
     static void setLogFunc(void (*pLogFn)(const char*));
     static void logmsg(const char*);
+    // the internal log sink is thread-local; internal threads call this so
+    // logs they emit also reach the setLogFunc handler (no-op if none set)
+    static void registerCurrentThread();
 
 private:
     static void (*_logmsg)(const char*);

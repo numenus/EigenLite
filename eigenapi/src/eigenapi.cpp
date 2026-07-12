@@ -83,4 +83,7 @@ void Logger::setLogFunc(void (*pLogFn)(const char*)) {
 void Logger::logmsg(const char* msg) {
     if (Logger::_logmsg != NULL) Logger::_logmsg(msg);
 }
+void Logger::registerCurrentThread() {
+    if (Logger::_logmsg != NULL) pic::logger_t::tsd_setlogger(&theLogger);
+}
 }  // namespace EigenApi

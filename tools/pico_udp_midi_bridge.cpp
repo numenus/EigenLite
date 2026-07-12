@@ -98,6 +98,24 @@ void dump_foreground_pico_enumeration() {
     }
 }
 
+// EigenLite's internal (picross) log stream, filtered. Without --debug the
+// known-noise lines are dropped: per-second enumerator polling, and the
+// non-fatal isochronous "frame out of order" diagnostics (present on both
+// usbipd and native Windows; data is still processed).
+bool g_verbose_internal_logs = false;
+
+void bridge_log_filter(const char* msg) {
+    if (!g_verbose_internal_logs) {
+        if (std::strstr(msg, "frame out of order") != nullptr ||
+            std::strstr(msg, "enumerate : searching") != nullptr ||
+            std::strstr(msg, "enumerate found") != nullptr ||
+            std::strstr(msg, "availableDevices found") != nullptr) {
+            return;
+        }
+    }
+    std::cerr << "log:" << msg << std::endl;
+}
+
 class UdpMidiOut : public PicoBridge::MidiSink {
    public:
     UdpMidiOut(const std::string& host, int port) : sock_(kInvalidSocket) {
@@ -213,6 +231,9 @@ int main(int argc, char** argv) {
     if (argc >= 7) {
         led_port = std::atoi(argv[6]);
     }
+
+    g_verbose_internal_logs = debug;
+    EigenApi::Logger::setLogFunc(bridge_log_filter);
 
     try {
         WinsockInit winsock;
