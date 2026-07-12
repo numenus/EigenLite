@@ -58,9 +58,19 @@ raw-fprintf instrumentation proved discover thread ran but spinlock never
 acquired -> flag init. Validated natively: enumeration, firmware self-load
 (no pico_loader.py), iso input over libusb-win32 driver, keys -> loopMIDI.
 
-## Open
+## Live validation status (2026-07-12)
 
-- [ ] live: Bitwig LED control path, parity mode, cold-replug auto-reconnect
-      (fixed code path untested), latency vs WSL chain
-- [ ] consider upstreaming the two fixes
-- [ ] roadmap cross-ref + close-out once remaining live checks pass
+- [x] notes/keys/press-lights native (07-11)
+- [x] LED control path end to end: Bitwig HW Instrument ch16 -> "Pico Out"
+      -> receiver sink -> UDP 5006 -> LEDs. Protocol reworked DAW-native
+      (velocity thirds = colour, note-off clears). Gotchas found: Bitwig
+      needs restart to bind ports created/freed mid-session; LED track must
+      NOT be armed/monitoring (idle pico CC drift loops back out -> loopMIDI
+      feedback mute); clip notes must be MIDI 0-17 (3 octaves below
+      Bitwig's default draw area)
+- [x] replug recovery: in-process teardown race crashes bridge (accepted);
+      pico-native.ps1 relaunch loop makes replug self-heal -- validated
+- [ ] parity mode feel session, latency vs WSL chain (play-testing only)
+- [ ] consider upstreaming: atomic_flag init, checkFirmware rename,
+      dead-device cleanup ordering
+- [ ] roadmap cross-ref + close-out

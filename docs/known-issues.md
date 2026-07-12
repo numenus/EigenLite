@@ -4,17 +4,16 @@ Active limitations and deferred work. Sourced from code analysis and `docs/archi
 
 ---
 
-## Native Bridge: Unplug-While-Running May Crash After Reconnect Attempt
+## Native Bridge: Unplug Crashes the Process (Recovered by Relaunch Loop)
 
 Live-observed 2026-07-12 (native Windows): unplugging the Pico while the
-bridge runs floods failed-transfer callbacks from the dead device; the
-subsequent auto-reconnect (firmware load) raced with that teardown and the
-process eventually died silently. Mitigations landed: dead devices are now
-destroyed before new connects in `EigenLite::poll()` (`eigenlite.cpp`), and
-the bridge log filter throttles the flood. The underlying teardown race in
-the EigenD-era USB code is NOT fully fixed — treat live replug as
-best-effort. Workaround: restart `pico-native.ps1` after replugging
-(~5s warm, ~40s if firmware reloads). Accepted as QoL-only.
+bridge runs eventually crashes the process — a teardown race in the
+EigenD-era USB code that survived cleanup reordering and flood throttling.
+Accepted rather than fixed: `pico-native.ps1` relaunches the bridge on
+abnormal exit (2s delay, 3-strike fast-failure abort), so replug =
+crash -> auto relaunch -> firmware load -> reconnected, no manual steps.
+**Validated live 2026-07-12.** In-process teardown race remains open if
+anyone ever wants true crash-free unplug.
 
 ## WSL-Flow Features Not Live-Tested (now legacy path)
 
