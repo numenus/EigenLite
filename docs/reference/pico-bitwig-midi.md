@@ -192,6 +192,34 @@ py "\\wsl.localhost\Ubuntu-26.04\home\hotpo\repos\EigenLite\tools\udp_midi_recei
 py "\\wsl.localhost\Ubuntu-26.04\home\hotpo\repos\EigenLite\tools\udp_midi_receiver.py" --out "Pico In" --sink-in "Pico Out" --port 5005 --debug --debug-filter ribbon
 ```
 
+## Tuning (feel constants)
+
+All in `tools/pico_midi_bridge_core.h` (top of file). After changing:
+`cmake --build build-win-native -j8`, close the bridge, copy the exe over,
+restart. Byte-exact unit tests pin some current values -- update
+`tests/PicoMidiBridgeTest.cpp` expectations to match (`ctest` on Linux).
+
+Parity key gating + velocity:
+
+| Constant | Default | Raise it when... / Lower it when... |
+|---|---|---|
+| `kParityKeyGateThreshold` | 300/3192 | ghost notes from resting fingers / soft presses get swallowed |
+| `kParityKeyHardThreshold` | 900/3192 | hard presses double-trigger / hard attacks feel late |
+| `kParityKeyRiseThreshold` | 220/3192 | slow leans false-trigger / slow-soft presses get missed |
+| `kParityKeyDebounceUs` | 20000 | release bounce double-fires / fast trills get swallowed |
+| `kParityEstimationFrames` | 14 | velocity feels random (longer look) / attack feels laggy |
+| `kParityKeyVelocityFullPressure` | 0.75 | max velocity too easy to hit / can't reach 127 without mashing |
+| `kParityKeyVelocityFloor` | 0.08 | soft notes inaudible / soft notes too loud |
+| `kParityKeyVelocityCurve` | 0.6 | soft range too compressed (toward 1.0) / soft range too jumpy (toward 0.4) |
+
+Breath: `kBreathMidiGain` (6, stable-mode sensitivity),
+`kParityBreathDeadband` (0.015, idle noise floor), `kParityBreathGain` (4),
+`kParityBreathHoldTicks` (100, how long the last value holds at zero-cross).
+
+Mapping surface: `kBreathCc` 2, `kRibbonCc` 21, `kRibbonRelativeCc` 22,
+`kRollCc` 74, `kModeButtonBaseNote` 44, main keys = `key + 48`. LED colour
+thresholds are the velocity thirds in `handle_led_control`.
+
 ## Rationale
 
 Earlier bridge revisions had three problems:
