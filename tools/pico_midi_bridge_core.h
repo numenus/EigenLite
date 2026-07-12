@@ -45,6 +45,9 @@ constexpr float kParityKeyRiseThreshold = 220.0f / 3192.0f;
 constexpr float kParityKeyVelocityFullPressure = 0.75f;
 constexpr float kParityKeyVelocityFloor = 0.08f;  // gated notes never inaudible
 constexpr float kParityKeyVelocityCurve = 0.6f;
+// relative roll: CC74 = 64 + (roll - roll at note start) * gain; raise the
+// gain if rocking barely moves the CC, lower if it pegs too easily
+constexpr float kParityRollGain = 1.0f;
 
 inline unsigned to_u7(float v) {
     if (v < 0.0f) v = 0.0f;
@@ -376,13 +379,6 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
                       << " pressure=" << p << " [parity]" << std::endl;
         }
 
-        // Diagnostic per-key roll, parity-mode only: last-touched key's tilt as a
-        // single CC. Not gated on note-on state -- it's an auxiliary expressive
-        // signal, not part of note triggering.
-        if (active) {
-            send_cc(out, kRollCc, (r + 1.0f) * 0.5f, 2);
-        }
-
         auto& state = keys_[key];
         const uint8_t note = static_cast<uint8_t>(key + 48);
 
@@ -393,6 +389,7 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
                               << " max=" << state.max_pressure << " [parity]" << std::endl;
                 }
                 out.send3(0x80, note, 0);
+                send_cc(out, kRollCc, 0.5f, 2);  // recentre roll with the note
             } else if (debug && debug_scope == DebugScope::Gates && state.tracking) {
                 std::cout << "gate release_without_note key=" << key << " note=" << static_cast<unsigned>(note)
                           << " first=" << state.first_pressure
@@ -464,6 +461,7 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
                 }
                 out.send3(0x90, note, vel == 0 ? 1 : vel);
                 state.note_on = true;
+                state.roll_origin = r;
             } else {
                 if (debug && debug_scope == DebugScope::Gates) {
                     std::cout << "gate reject key=" << key << " note=" << static_cast<unsigned>(note)
@@ -476,6 +474,15 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
                 return;
             }
         }
+
+        // Relative roll, parity-only: rocking the key wobbles CC74 around 64,
+        // measured from where the finger landed at note start -- absolute
+        // tilt would slam the CC on every press since fingers rarely land
+        // dead centre.
+        float roll_delta = (r - state.roll_origin) * kParityRollGain;
+        if (roll_delta < -1.0f) roll_delta = -1.0f;
+        if (roll_delta > 1.0f) roll_delta = 1.0f;
+        send_cc(out, kRollCc, (roll_delta + 1.0f) * 0.5f, 2);
 
         send_poly_pressure(out, key, note, p);
     }
@@ -534,6 +541,7 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
         unsigned frames = 0;
         float first_pressure = 0.0f;
         float max_pressure = 0.0f;
+        float roll_origin = 0.0f;
         unsigned long long last_release_ts = 0ULL;
     };
 

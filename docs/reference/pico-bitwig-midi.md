@@ -67,9 +67,13 @@ as a MIDI controller in Bitwig through:
 
 ### Roll (parity mode only)
 
-- last-touched main key's roll (tilt) -> `CC74`
+- rocking a sounding key -> `CC74`, **relative**: centred at 64 where the
+  finger landed at note start, moves as you rock away from that point,
+  recentres to 64 on release
+- only sent while a note is gated on (absolute/ungated roll slammed mapped
+  parameters on every press, since fingers rarely land dead centre)
 - only sent in `parity` mode; `stable` mode does not send it
-- diagnostic/expressive signal, not gated on note-on state
+- sensitivity: `kParityRollGain`
 - sent only when the MIDI 7-bit value changes
 
 ## LED Feedback
@@ -217,7 +221,7 @@ Breath: `kBreathMidiGain` (6, stable-mode sensitivity),
 `kParityBreathHoldTicks` (100, how long the last value holds at zero-cross).
 
 Mapping surface: `kBreathCc` 2, `kRibbonCc` 21, `kRibbonRelativeCc` 22,
-`kRollCc` 74, `kModeButtonBaseNote` 44, main keys = `key + 48`. LED colour
+`kRollCc` 74 (`kParityRollGain` 1.0 = rocking sensitivity), `kModeButtonBaseNote` 44, main keys = `key + 48`. LED colour
 thresholds are the velocity thirds in `handle_led_control`.
 
 ## Rationale

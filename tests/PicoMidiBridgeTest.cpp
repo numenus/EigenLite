@@ -227,21 +227,59 @@ TEST(ParityBridge, ReleaseWithoutGatedNoteSendsNoNoteOff) {
     }
 }
 
-// --- Parity: roll CC (diagnostic, not gated on note-on) -------------------
+// --- Parity: relative roll CC (gated on note-on) ---------------------------
 
-TEST(ParityBridge, RollSendsCc74WhenKeyActiveRegardlessOfGate) {
+TEST(ParityBridge, RollIsRelativeToNoteStartAndGated) {
     ParityMidiBridgeImplementation impl;
     RecordingSink sink;
-    // r=0.5 -> unipolar (0.5+1)*0.5 = 0.75 -> round(0.75*127) = 95.
+
+    // before any note gates, touches send no roll (absolute tilt would slam
+    // the CC on every press)
     impl.on_key(sink, false, DebugScope::All, 0, 0, 0, true, 0.02f, 0.5f, 0.f);
-    bool sawRoll = false;
+    for (const auto& m : sink.sent) {
+        EXPECT_FALSE(m.status == 0xB0 && m.d1 == 74) << "no roll before note-on";
+    }
+    sink.sent.clear();
+
+    // gate a note with a rising attack, finger landing at roll 0.5
+    for (unsigned long long t = 1; t <= kParityEstimationFrames; ++t) {
+        const float p = 0.5f * static_cast<float>(t) / kParityEstimationFrames;
+        impl.on_key(sink, false, DebugScope::All, t, 0, 0, true, p, 0.5f, 0.f);
+    }
+    // unchanged roll while held = centred 64
+    bool sawCentre = false;
     for (const auto& m : sink.sent) {
         if (m.status == 0xB0 && m.d1 == 74) {
-            sawRoll = true;
-            EXPECT_EQ(m.d2, 95);
+            sawCentre = true;
+            EXPECT_EQ(m.d2, 64);
         }
     }
-    EXPECT_TRUE(sawRoll);
+    EXPECT_TRUE(sawCentre);
+    sink.sent.clear();
+
+    // rocking away from where the finger landed moves the CC off centre
+    impl.on_key(sink, false, DebugScope::All, 100, 0, 0, true, 0.5f, 0.9f, 0.f);
+    bool sawDelta = false;
+    for (const auto& m : sink.sent) {
+        if (m.status == 0xB0 && m.d1 == 74) {
+            sawDelta = true;
+            // delta 0.4 -> (0.4+1)*0.5 = 0.7 -> round(0.7*127) = 89
+            EXPECT_EQ(m.d2, 89);
+        }
+    }
+    EXPECT_TRUE(sawDelta);
+    sink.sent.clear();
+
+    // release recentres
+    impl.on_key(sink, false, DebugScope::All, 200, 0, 0, false, 0.f, 0.f, 0.f);
+    bool sawRecentre = false;
+    for (const auto& m : sink.sent) {
+        if (m.status == 0xB0 && m.d1 == 74) {
+            sawRecentre = true;
+            EXPECT_EQ(m.d2, 64);
+        }
+    }
+    EXPECT_TRUE(sawRecentre);
 }
 
 TEST(StableBridge, DoesNotSendRollCc) {
