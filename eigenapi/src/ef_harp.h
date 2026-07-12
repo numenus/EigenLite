@@ -115,7 +115,9 @@ public:
     static std::vector<std::string> availableDevices();
 
 private:
-    bool checkFirmware(const std::string& usbdev);
+    // usbdev is in/out: a firmware load makes the pico re-enumerate with a
+    // new product id + address, so the caller must continue with the new name
+    bool checkFirmware(std::string& usbdev);
     bool loadPicoFirmware(const std::string& usbdev);
     pico::active_t* pLoop_;
 

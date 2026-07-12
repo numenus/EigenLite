@@ -82,6 +82,9 @@ class EigenLite {
     IFW_Reader* fwReader_;
     IFW_Reader* internalReader_;
 
-    std::atomic_flag usbDevCheckSpinLock;
+    // must be explicitly initialised: pre-C++20 the default state is
+    // unspecified, and it starts SET under MinGW -- since clear() only runs
+    // after a successful acquire, that permanently deadlocks USB discovery
+    std::atomic_flag usbDevCheckSpinLock = ATOMIC_FLAG_INIT;
 };
 }  // namespace EigenApi

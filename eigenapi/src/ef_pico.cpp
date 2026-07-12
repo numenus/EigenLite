@@ -31,11 +31,14 @@ EF_Pico::~EF_Pico() {
 bool EF_Pico::create(const std::string &usbdev) {
     logmsg("create eigenharp pico");
 
-    if (!checkFirmware(usbdev)) {
+    // checkFirmware rewrites the name if it had to load firmware (the device
+    // re-enumerates under a different product id/address)
+    std::string dev = usbdev;
+    if (!checkFirmware(dev)) {
         return false;
     }
 
-    if (!EF_Harp::create(usbdev)) return false;
+    if (!EF_Harp::create(dev)) return false;
 
     try {
         logmsg("close device to allow active_t to open");
@@ -146,7 +149,7 @@ bool EF_Pico::loadPicoFirmware(const std::string &usbdev) {
     return loadFirmware(pDevice, ihxFile);
 }
 
-bool EF_Pico::checkFirmware(const std::string &usbdevice) {
+bool EF_Pico::checkFirmware(std::string &usbdevice) {
     devcheck f(usbdevice);
     pic::usbenumerator_t::enumerate(BCTPICO_USBVENDOR, PICO_PRE_LOAD, pic::f_string_t::method(&f, &devcheck::found));
 
@@ -156,16 +159,22 @@ bool EF_Pico::checkFirmware(const std::string &usbdevice) {
         if (loadPicoFirmware(usbdevice)) {
             logmsg("pico firmware loaded");
 
-            f.found_ = false;
-            pic::usbenumerator_t::enumerate(BCTPICO_USBVENDOR, PRODUCT_ID_PICO, pic::f_string_t::method(&f, &devcheck::found));
-            for (int i = 0; i < 10 && f.found_ == false; i++) {
+            // the reloaded pico re-enumerates with a new product id and (on
+            // libusb, where names are vendor.product.addr.bus) a new address,
+            // so the pre-load name can never reappear: accept any post-load
+            // pico and hand the new name back to the caller
+            std::vector<std::string> postLoad;
+            devfinder pf(postLoad);
+            pic::usbenumerator_t::enumerate(BCTPICO_USBVENDOR, PRODUCT_ID_PICO, pic::f_string_t::method(&pf, &devfinder::found));
+            for (int i = 0; i < 10 && postLoad.empty(); i++) {
                 logmsg("attempting to find pico...");
                 pic_microsleep(1000000);
                 // can take a few seconds for pico to reregister itself
-                pic::usbenumerator_t::enumerate(BCTPICO_USBVENDOR, PRODUCT_ID_PICO, pic::f_string_t::method(&f, &devcheck::found));
+                pic::usbenumerator_t::enumerate(BCTPICO_USBVENDOR, PRODUCT_ID_PICO, pic::f_string_t::method(&pf, &devfinder::found));
             }
 
-            if (f.found_) {
+            if (!postLoad.empty()) {
+                usbdevice = postLoad.front();
                 char buf[1024];
                 snprintf(buf, 1024, "pico loaded dev: %s ", usbdevice.c_str());
                 logmsg(buf);
@@ -186,6 +195,15 @@ std::vector<std::string> EF_Pico::availableDevices() {
     devfinder f(devList);
     pic::usbenumerator_t::enumerate(BCTPICO_USBVENDOR, PICO_PRE_LOAD, pic::f_string_t::method(&f, &devfinder::found));
     pic::usbenumerator_t::enumerate(BCTPICO_USBVENDOR, PRODUCT_ID_PICO, pic::f_string_t::method(&f, &devfinder::found));
+    if (devList.empty()) {
+        logmsg("EF_Pico::availableDevices found no Pico USB devices");
+    } else {
+        for (const auto& dev : devList) {
+            char buf[256];
+            snprintf(buf, sizeof(buf), "EF_Pico::availableDevices found %s", dev.c_str());
+            logmsg(buf);
+        }
+    }
     return devList;
 }
 

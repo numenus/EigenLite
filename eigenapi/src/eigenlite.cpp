@@ -87,18 +87,30 @@ void EigenLite::clearLifecycleCallbacks() {
 volatile bool discoverProcessRun = true;
 
 void* discoverProcess(void* pthis) {
+    // raw stderr on purpose: proves the thread body runs even if the
+    // TLS-based pic logging path is itself broken on this platform
+    fprintf(stderr, "raw: discover thread entered\n");
+    fflush(stderr);
     auto pThis = static_cast<EigenLite*>(pthis);
+    unsigned long spinMisses = 0;
     while (discoverProcessRun) {
         if (pThis->checkUsbDev()) {
+            spinMisses = 0;
             // 10seconds
             pic_microsleep(10 * 100000);
         } else {
             // failed as poll() in progress
             // try again quickly, spinlock
             // 1 mS
+            if (++spinMisses % 5000 == 1) {
+                fprintf(stderr, "raw: discover spinlock misses=%lu\n", spinMisses);
+                fflush(stderr);
+            }
             pic_microsleep(1000);
         }
     }
+    fprintf(stderr, "raw: discover thread exiting\n");
+    fflush(stderr);
     return nullptr;
 }
 
@@ -138,6 +150,15 @@ bool EigenLite::checkUsbDev() {
             availablePicos_ = picoUSBDevList;
         }
 
+        {
+            char buf[256];
+            snprintf(buf, sizeof(buf), "checkUsbDev: %u pico device(s), %u basestation device(s), changed=%u",
+                     static_cast<unsigned>(availablePicos_.size()),
+                     static_cast<unsigned>(availableBaseStations_.size()),
+                     usbDevChange_ ? 1U : 0U);
+            logmsg(buf);
+        }
+
         usbDevCheckSpinLock.clear();
         return true;
     }
@@ -156,6 +177,8 @@ bool EigenLite::create() {
     pic_init_time();
     discoverProcessRun = true;
     discoverThread_ = std::thread(discoverProcess, this);
+    fprintf(stderr, "raw: discover thread launched\n");
+    fflush(stderr);
     pic_set_foreground(true);
     lastPollTime_ = 0;
     usbDevChange_ = false;
@@ -228,6 +251,10 @@ bool EigenLite::connectNewBaseStation() {
 bool EigenLite::connectNewPico() {
     bool newDevice = true;
     std::string usbDev;
+    if (availablePicos_.empty()) {
+        logmsg("connectNewPico: no available Pico devices to connect");
+        return false;
+    }
     if (filterDeviceEnum_ == 0) {
         for (const auto& usbDevStr : availablePicos_) {
             newDevice = true;
@@ -244,7 +271,7 @@ bool EigenLite::connectNewPico() {
         }
     } else {
         int filterIdx = filterDeviceEnum_ - 1;  // 0 = first
-        if (filterIdx < availableBaseStations_.size()) {
+        if (filterIdx < availablePicos_.size()) {
             newDevice = true;
             const auto& usbDevStr = availablePicos_[filterIdx];
             for (auto dev : devices_) {
@@ -269,7 +296,12 @@ bool EigenLite::connectNewPico() {
             pDevice->start();
             return true;
         }
+        snprintf(logbuf, 100, "connectNewPico: create failed for %s", usbDev.c_str());
+        logmsg(logbuf);
+        delete pDevice;
+        return false;
     }
+    logmsg("connectNewPico: enumerated Pico already tracked/open");
     return false;
 }
 
@@ -278,6 +310,11 @@ bool EigenLite::poll() {
     // check for device changes
     if (!usbDevCheckSpinLock.test_and_set()) {
         if (usbDevChange_) {
+            char buf[256];
+            snprintf(buf, sizeof(buf), "poll: usbDevChange set (picos=%u bases=%u)",
+                     static_cast<unsigned>(availablePicos_.size()),
+                     static_cast<unsigned>(availableBaseStations_.size()));
+            logmsg(buf);
             bool newDevice = false;
             for (auto cb : lifecycleCallbacks_) {
                 cb->beginDeviceInfo();
@@ -307,6 +344,7 @@ bool EigenLite::poll() {
                 usbDevCheckSpinLock.clear();
                 return true;
             }
+            logmsg("poll: usbDevChange handled but no new device was created");
             usbDevChange_ = false;
         }  // usbDevChange_
         usbDevCheckSpinLock.clear();

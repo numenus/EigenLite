@@ -1,4 +1,5 @@
 #include "pico_midi_bridge_core.h"
+#include "ef_harp.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -82,6 +83,19 @@ volatile sig_atomic_t keep_running = 1;
 
 void int_handler(int) {
     keep_running = 0;
+}
+
+void dump_foreground_pico_enumeration() {
+    const std::vector<std::string> devices = EigenApi::EF_Pico::availableDevices();
+    if (devices.empty()) {
+        std::cout << "foreground pico enumeration: no devices" << std::endl;
+        return;
+    }
+
+    std::cout << "foreground pico enumeration: " << devices.size() << " device(s)" << std::endl;
+    for (const auto& dev : devices) {
+        std::cout << "foreground pico device: " << dev << std::endl;
+    }
 }
 
 class UdpMidiOut : public PicoBridge::MidiSink {
@@ -228,6 +242,7 @@ int main(int argc, char** argv) {
                   << " scope=" << debug_scope_name
                   << " led_port=" << led_port
                   << std::endl;
+        dump_foreground_pico_enumeration();
 
         auto* cb = new MidiBridgeCallback(out, debug, debug_scope, make_bridge_implementation(mode), &harp);
         harp.addLifecycleCallback(cb);
