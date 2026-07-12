@@ -160,4 +160,29 @@ if ($DebugBridge) {
 
 Write-Host "Starting native bridge: $BridgeExe 127.0.0.1 $UdpPort $debugFlag $Mode $DebugScope $bridgeLedPort"
 Write-Host "(Ctrl+C stops it; the receiver window stays up for reuse)"
-& $BridgeExe 127.0.0.1 $UdpPort $debugFlag $Mode $DebugScope $bridgeLedPort
+
+# The EigenD-era USB teardown can crash the bridge when the Pico is
+# unplugged while running. Recovery is process-level: relaunch on abnormal
+# exit (clean Ctrl+C exits 0 and stops the loop). Repeated immediate
+# failures abort so a broken setup doesn't spin forever.
+$fastFailures = 0
+while ($true) {
+    $startedAt = Get-Date
+    & $BridgeExe 127.0.0.1 $UdpPort $debugFlag $Mode $DebugScope $bridgeLedPort
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -eq 0) {
+        break
+    }
+    $ranSeconds = ((Get-Date) - $startedAt).TotalSeconds
+    if ($ranSeconds -lt 10) {
+        $fastFailures++
+        if ($fastFailures -ge 3) {
+            Write-Host "Bridge failed $fastFailures times within seconds of starting (last exit code $exitCode). Giving up."
+            break
+        }
+    } else {
+        $fastFailures = 0
+    }
+    Write-Host "Bridge exited abnormally (code $exitCode) - most likely a USB unplug. Restarting in 2s (Ctrl+C to stop)"
+    Start-Sleep -Seconds 2
+}
