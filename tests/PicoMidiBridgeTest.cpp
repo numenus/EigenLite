@@ -125,9 +125,26 @@ TEST(StableBridge, MappableModeButtonsSendNotes46And47) {
 TEST(StableBridge, ModeButtonReleaseSendsNoteOff) {
     StableMidiBridgeImplementation impl;
     RecordingSink sink;
-    impl.on_button(sink, false, DebugScope::All, 0, 2, false);
+    impl.on_button(sink, false, DebugScope::All, 0, 2, true);
+    sink.sent.clear();
+    impl.on_button(sink, false, DebugScope::All, 1, 2, false);
     ASSERT_EQ(sink.sent.size(), 1u);
     EXPECT_EQ(sink.sent[0], (Msg{0x80, 46, 0}));
+}
+
+TEST(StableBridge, ButtonEventsAreEdgeTriggered) {
+    // the Pico streams button events while held; held-repeat must not
+    // retrigger notes or (critically) repeat octave shifts
+    StableMidiBridgeImplementation impl;
+    RecordingSink sink;
+    for (int i = 0; i < 50; ++i) {
+        impl.on_button(sink, false, DebugScope::All, i, 2, true);
+    }
+    ASSERT_EQ(sink.sent.size(), 1u) << "one note-on per physical press";
+    for (int i = 0; i < 50; ++i) {
+        impl.on_button(sink, false, DebugScope::All, 100 + i, kOctaveUpButton, true);
+    }
+    EXPECT_EQ(impl.octave_shift(), 1) << "one shift per physical press";
 }
 
 TEST(StableBridge, IgnoresOutOfRangeButtonIndex) {

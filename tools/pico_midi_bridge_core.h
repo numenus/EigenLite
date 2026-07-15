@@ -302,6 +302,7 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
         for (uint8_t& v : last_cc_) v = 0xFF;
         for (unsigned long long& v : key_last_event_t_) v = 0ULL;
         for (uint8_t& v : key_note_) v = 0;
+        for (bool& v : button_down_) v = false;
     }
 
     int octave_shift() const override {
@@ -352,6 +353,15 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
         }
 
         reap_stuck_notes(out, t);
+
+        // the Pico fires button events repeatedly while held (per USB
+        // frame), not once per press -- everything below must be
+        // edge-triggered or a single tap slams the octave to the clamp
+        // and note buttons machine-gun note-ons
+        if (button_down_[key] == active) {
+            return;
+        }
+        button_down_[key] = active;
 
         if (key == kOctaveDownButton || key == kOctaveUpButton) {
             if (active) {
@@ -444,6 +454,7 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
     }
 
     bool key_down_[128];
+    bool button_down_[4];
     uint8_t last_pressure_[128];
     uint8_t last_cc_[8];
     uint8_t key_note_[128];
