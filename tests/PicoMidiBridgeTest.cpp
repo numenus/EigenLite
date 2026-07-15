@@ -282,6 +282,90 @@ TEST(ParityBridge, RollIsRelativeToNoteStartAndGated) {
     EXPECT_TRUE(sawRecentre);
 }
 
+// --- Stuck-note watchdog ----------------------------------------------------
+// The closed decoder can drop key tracking without a key-up when skipped iso
+// frames force a resync: the key just goes silent while the note is sounding.
+// Other events (breath streams constantly) keep flowing, so a gated note
+// whose key has been silent past kStuckNoteTimeoutUs is force-released.
+
+namespace {
+// gate a parity note on key 0 with a rising attack; returns t after the last frame
+unsigned long long gate_parity_note(ParityMidiBridgeImplementation& impl, RecordingSink& sink,
+                                    unsigned long long t0 = 1) {
+    for (unsigned long long i = 0; i < kParityEstimationFrames; ++i) {
+        const float p = 0.5f * static_cast<float>(i + 1) / kParityEstimationFrames;
+        impl.on_key(sink, false, DebugScope::All, t0 + i, 0, 0, true, p, 0.f, 0.f);
+    }
+    return t0 + kParityEstimationFrames;
+}
+
+bool saw_msg(const RecordingSink& sink, uint8_t status, uint8_t d1) {
+    for (const auto& m : sink.sent) {
+        if (m.status == status && m.d1 == d1) return true;
+    }
+    return false;
+}
+}  // namespace
+
+TEST(ParityBridge, WatchdogReleasesNoteWhenKeyStreamGoesSilent) {
+    ParityMidiBridgeImplementation impl;
+    RecordingSink sink;
+    const unsigned long long t = gate_parity_note(impl, sink);
+    ASSERT_TRUE(saw_msg(sink, 0x90, 48));
+    sink.sent.clear();
+    // release lost; only breath still streaming
+    impl.on_breath(sink, false, DebugScope::All, t + kStuckNoteTimeoutUs + 1, 0.f);
+    EXPECT_TRUE(saw_msg(sink, 0x80, 48)) << "watchdog must force the note off";
+}
+
+TEST(ParityBridge, WatchdogDoesNotFireWhileKeyKeepsStreaming) {
+    ParityMidiBridgeImplementation impl;
+    RecordingSink sink;
+    unsigned long long t = gate_parity_note(impl, sink);
+    sink.sent.clear();
+    // long hold: key events keep arriving, breath interleaved, big total time
+    for (int i = 0; i < 10; ++i) {
+        t += kStuckNoteTimeoutUs / 2;
+        impl.on_key(sink, false, DebugScope::All, t, 0, 0, true, 0.5f, 0.f, 0.f);
+        impl.on_breath(sink, false, DebugScope::All, t + 1, 0.f);
+    }
+    EXPECT_FALSE(saw_msg(sink, 0x80, 48)) << "held key streaming events must not be reaped";
+}
+
+TEST(ParityBridge, KeyPressAfterWatchdogRetriggersFreshNoteOn) {
+    ParityMidiBridgeImplementation impl;
+    RecordingSink sink;
+    unsigned long long t = gate_parity_note(impl, sink);
+    sink.sent.clear();
+    // stuck note reaped by its own resumed press, then a fresh note gates
+    t += kStuckNoteTimeoutUs + 1;
+    const unsigned long long after = gate_parity_note(impl, sink, t);
+    (void)after;
+    EXPECT_TRUE(saw_msg(sink, 0x80, 48)) << "stale note released first";
+    EXPECT_TRUE(saw_msg(sink, 0x90, 48)) << "new press retriggers";
+}
+
+TEST(StableBridge, WatchdogReleasesNoteWhenKeyStreamGoesSilent) {
+    StableMidiBridgeImplementation impl;
+    RecordingSink sink;
+    impl.on_key(sink, false, DebugScope::All, 0, 0, 0, true, 0.5f, 0.f, 0.f);
+    sink.sent.clear();
+    impl.on_breath(sink, false, DebugScope::All, kStuckNoteTimeoutUs + 1, 0.f);
+    EXPECT_TRUE(saw_msg(sink, 0x80, 48)) << "watchdog must force the note off";
+}
+
+TEST(ParityBridge, ReleaseAllFlushesSoundingNotes) {
+    ParityMidiBridgeImplementation impl;
+    RecordingSink sink;
+    gate_parity_note(impl, sink);
+    sink.sent.clear();
+    impl.release_all(sink);
+    EXPECT_TRUE(saw_msg(sink, 0x80, 48));
+    sink.sent.clear();
+    impl.release_all(sink);
+    EXPECT_TRUE(sink.sent.empty()) << "already flushed";
+}
+
 TEST(StableBridge, DoesNotSendRollCc) {
     // Roll (CC74) is parity-only; stable mode must never emit it.
     StableMidiBridgeImplementation impl;

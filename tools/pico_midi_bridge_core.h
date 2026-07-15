@@ -48,6 +48,13 @@ constexpr float kParityKeyVelocityCurve = 0.6f;
 // relative roll: CC74 = 64 + (roll - roll at note start) * gain; raise the
 // gain if rocking barely moves the CC, lower if it pegs too easily
 constexpr float kParityRollGain = 1.0f;
+// stuck-note watchdog: the device streams events for a held key every frame,
+// so a sounding note whose key has gone silent this long -- while other
+// events (breath streams constantly) still flow -- lost its release; the
+// closed decoder drops key tracking without a key-up when skipped iso frames
+// force a resync. Force the note off and re-arm the key so the next press
+// retriggers cleanly.
+constexpr unsigned long long kStuckNoteTimeoutUs = 250000ULL;
 
 inline unsigned to_u7(float v) {
     if (v < 0.0f) v = 0.0f;
@@ -260,6 +267,8 @@ class MidiBridgeImplementation {
     virtual void on_button(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long t, unsigned key, bool active) = 0;
     virtual void on_breath(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long t, float val) = 0;
     virtual void on_strip(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long t, unsigned strip, float val, bool active) = 0;
+    // force note-off for everything sounding (device disconnect / shutdown)
+    virtual void release_all(MidiSink& out) = 0;
 };
 
 class StableMidiBridgeImplementation : public MidiBridgeImplementation {
@@ -268,13 +277,14 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
         for (bool& v : key_down_) v = false;
         for (uint8_t& v : last_pressure_) v = 0xFF;
         for (uint8_t& v : last_cc_) v = 0xFF;
+        for (unsigned long long& v : key_last_event_t_) v = 0ULL;
     }
 
     const char* name() const override {
         return "stable";
     }
 
-    void on_key(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long /*t*/, unsigned course, unsigned key, bool active, float p, float /*r*/, float /*y*/) override {
+    void on_key(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long t, unsigned course, unsigned key, bool active, float p, float /*r*/, float /*y*/) override {
         if (course != 0 || key >= 128) {
             return;
         }
@@ -283,10 +293,13 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
             std::cout << "key course=" << course << " key=" << key << " active=" << active << " pressure=" << p << std::endl;
         }
 
+        reap_stuck_notes(out, t);
+
         const uint8_t note = static_cast<uint8_t>(key + 48);
         const uint8_t vel = static_cast<uint8_t>(to_u7(p));
 
         if (active) {
+            key_last_event_t_[key] = t;
             if (!key_down_[key]) {
                 out.send3(0x90, note, vel == 0 ? 1 : vel);
                 key_down_[key] = true;
@@ -301,7 +314,7 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
         }
     }
 
-    void on_button(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long /*t*/, unsigned key, bool active) override {
+    void on_button(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long t, unsigned key, bool active) override {
         if (key >= 4) {
             return;
         }
@@ -309,6 +322,8 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
         if (debug && (debug_scope == DebugScope::All || debug_scope == DebugScope::Gates)) {
             std::cout << "button key=" << key << " active=" << active << std::endl;
         }
+
+        reap_stuck_notes(out, t);
 
         const uint8_t note = static_cast<uint8_t>(kModeButtonBaseNote + key);
         if (active) {
@@ -318,21 +333,50 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
         }
     }
 
-    void on_breath(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long /*t*/, float val) override {
+    void on_breath(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long t, float val) override {
         if (debug && (debug_scope == DebugScope::All || debug_scope == DebugScope::Controls)) {
             std::cout << "breath " << val << std::endl;
         }
+        reap_stuck_notes(out, t);
         send_cc(out, kBreathCc, scale_breath(val), 0);
     }
 
-    void on_strip(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long /*t*/, unsigned strip, float val, bool active) override {
+    void on_strip(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long t, unsigned strip, float val, bool active) override {
         if (debug && (debug_scope == DebugScope::All || debug_scope == DebugScope::Controls)) {
             std::cout << "strip " << strip << " value=" << val << " active=" << active << std::endl;
         }
+        reap_stuck_notes(out, t);
         send_cc(out, kRibbonCc, active ? val : 0.0f, 1);
     }
 
+    void release_all(MidiSink& out) override {
+        for (unsigned key = 0; key < 128; ++key) {
+            if (!key_down_[key]) continue;
+            out.send3(0x80, static_cast<uint8_t>(key + 48), 0);
+            key_down_[key] = false;
+            last_pressure_[key] = 0xFF;
+        }
+    }
+
    protected:
+    // see kStuckNoteTimeoutUs; called from every event handler so a stuck
+    // key is reaped by whatever traffic is still flowing (breath streams
+    // constantly), and a re-press of a stuck key reaps itself first and
+    // then retriggers as a fresh note
+    virtual void reap_stuck_notes(MidiSink& out, unsigned long long t) {
+        if (t > latest_event_t_) latest_event_t_ = t;
+        for (unsigned key = 0; key < 128; ++key) {
+            if (!key_down_[key]) continue;
+            if (latest_event_t_ - key_last_event_t_[key] <= kStuckNoteTimeoutUs) continue;
+            std::cout << "watchdog: releasing stuck note key=" << key
+                      << " note=" << (key + 48)
+                      << " silent_ms=" << (latest_event_t_ - key_last_event_t_[key]) / 1000
+                      << std::endl;
+            out.send3(0x80, static_cast<uint8_t>(key + 48), 0);
+            key_down_[key] = false;
+            last_pressure_[key] = 0xFF;
+        }
+    }
     void send_poly_pressure(MidiSink& out, uint8_t note, float p) {
         const unsigned key = static_cast<unsigned>(note - 48);
         if (key >= 128) return;
@@ -353,6 +397,8 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
     bool key_down_[128];
     uint8_t last_pressure_[128];
     uint8_t last_cc_[8];
+    unsigned long long latest_event_t_ = 0ULL;
+    unsigned long long key_last_event_t_[128];
 };
 
 class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
@@ -379,8 +425,14 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
                       << " pressure=" << p << " [parity]" << std::endl;
         }
 
+        reap_stuck_notes(out, t);
+
         auto& state = keys_[key];
         const uint8_t note = static_cast<uint8_t>(key + 48);
+
+        if (active) {
+            state.last_event_t = t;
+        }
 
         if (!active) {
             if (state.note_on) {
@@ -487,10 +539,12 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
         send_poly_pressure(out, key, note, p);
     }
 
-    void on_breath(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long /*t*/, float val) override {
+    void on_breath(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long t, float val) override {
         if (debug && (debug_scope == DebugScope::All || debug_scope == DebugScope::Controls)) {
             std::cout << "breath " << val << " [parity]" << std::endl;
         }
+
+        reap_stuck_notes(out, t);
 
         float shaped = 0.0f;
         if (val > kParityBreathDeadband) {
@@ -508,10 +562,11 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
         send_cc(out, kBreathCc, shaped, 0);
     }
 
-    void on_strip(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long /*t*/, unsigned strip, float val, bool active) override {
+    void on_strip(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long t, unsigned strip, float val, bool active) override {
         if (debug && (debug_scope == DebugScope::All || debug_scope == DebugScope::Controls)) {
             std::cout << "strip " << strip << " value=" << val << " active=" << active << " [parity]" << std::endl;
         }
+        reap_stuck_notes(out, t);
         send_cc(out, kRibbonCc, active ? val : 0.0f, 1);
 
         // Relative ribbon: delta from touch origin, centred at CC 64 (no
@@ -532,6 +587,34 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
         }
     }
 
+    void release_all(MidiSink& out) override {
+        for (unsigned key = 0; key < 128; ++key) {
+            if (!keys_[key].note_on) continue;
+            out.send3(0x80, static_cast<uint8_t>(key + 48), 0);
+            send_cc(out, kRollCc, 0.5f, 2);
+            keys_[key] = {};
+            last_pressure_[key] = 0xFF;
+        }
+    }
+
+   protected:
+    void reap_stuck_notes(MidiSink& out, unsigned long long t) override {
+        if (t > latest_event_t_) latest_event_t_ = t;
+        for (unsigned key = 0; key < 128; ++key) {
+            auto& state = keys_[key];
+            if (!state.note_on) continue;
+            if (latest_event_t_ - state.last_event_t <= kStuckNoteTimeoutUs) continue;
+            std::cout << "watchdog: releasing stuck note key=" << key
+                      << " note=" << (key + 48)
+                      << " silent_ms=" << (latest_event_t_ - state.last_event_t) / 1000
+                      << " [parity]" << std::endl;
+            out.send3(0x80, static_cast<uint8_t>(key + 48), 0);
+            send_cc(out, kRollCc, 0.5f, 2);  // recentre roll with the note
+            state = {};
+            last_pressure_[key] = 0xFF;
+        }
+    }
+
    private:
     static constexpr unsigned kMaxStrips = 4;
 
@@ -543,6 +626,7 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
         float max_pressure = 0.0f;
         float roll_origin = 0.0f;
         unsigned long long last_release_ts = 0ULL;
+        unsigned long long last_event_t = 0ULL;
     };
 
     void send_poly_pressure(MidiSink& out, unsigned key, uint8_t note, float p) {
@@ -597,6 +681,7 @@ class MidiBridgeCallback : public EigenApi::LifecycleCallback, public EigenApi::
 
     void disconnected(const char* dev) override {
         std::cout << "disconnected " << dev << std::endl;
+        impl_->release_all(out_);  // no more key events coming; don't strand notes
         led_.clearDevice(dev);
     }
 

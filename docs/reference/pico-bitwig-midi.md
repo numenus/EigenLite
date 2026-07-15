@@ -76,6 +76,19 @@ as a MIDI controller in Bitwig through:
 - sensitivity: `kParityRollGain`
 - sent only when the MIDI 7-bit value changes
 
+### Stuck-note watchdog (both modes)
+
+- the closed pico decoder can drop key tracking without a key-up when skipped
+  iso frames force a resync: the key goes silent while its note is sounding,
+  and the note sticks forever (symptom: held note in the DAW, zero loopMIDI
+  traffic)
+- a held key streams events every frame (and breath streams constantly), so a
+  sounding note whose key has been silent for `kStuckNoteTimeoutUs` (250ms)
+  while other events still flow is force-released, logged as
+  `watchdog: releasing stuck note ...` in the bridge window
+- the key re-arms, so pressing it again retriggers a fresh note
+- on device disconnect all sounding notes are flushed immediately
+
 ## LED Feedback
 
 Two independent behaviors, layered: a DAW-set base colour per key, with a
@@ -223,6 +236,10 @@ Breath: `kBreathMidiGain` (6, stable-mode sensitivity),
 Mapping surface: `kBreathCc` 2, `kRibbonCc` 21, `kRibbonRelativeCc` 22,
 `kRollCc` 74 (`kParityRollGain` 1.0 = rocking sensitivity), `kModeButtonBaseNote` 44, main keys = `key + 48`. LED colour
 thresholds are the velocity thirds in `handle_led_control`.
+
+Watchdog: `kStuckNoteTimeoutUs` (250000) -- raise if legitimate held notes
+ever get cut (they shouldn't; held keys stream events continuously), lower
+for faster stuck-note recovery.
 
 ## Rationale
 
