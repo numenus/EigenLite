@@ -7,6 +7,7 @@
 
 #include <eigenapi.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -654,6 +655,19 @@ inline std::unique_ptr<MidiBridgeImplementation> make_bridge_implementation(Brid
     throw std::runtime_error("invalid bridge mode");
 }
 
+// Device timestamps cannot be trusted for arithmetic: during iso-frame
+// resyncs the closed 32-bit decoder emits events stamped with garbage time
+// (0x8000000000000000 -- the x86 sentinel for a failed float->int64
+// conversion). Debounce and the stuck-note watchdog difference timestamps,
+// so one bad value latches them broken (endless watchdog re-fires / dead
+// keys). Events are dispatched promptly from harp.process(), so bridge-local
+// monotonic time is accurate to well under a millisecond -- use that instead.
+inline unsigned long long mono_now_us() {
+    using namespace std::chrono;
+    return static_cast<unsigned long long>(
+        duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
 class MidiBridgeCallback : public EigenApi::LifecycleCallback, public EigenApi::Callback {
    public:
     MidiBridgeCallback(MidiSink& out, bool debug, DebugScope debug_scope, std::unique_ptr<MidiBridgeImplementation> impl,
@@ -685,15 +699,15 @@ class MidiBridgeCallback : public EigenApi::LifecycleCallback, public EigenApi::
         led_.clearDevice(dev);
     }
 
-    void key(const char* /*dev*/, unsigned long long t, unsigned course, unsigned key, bool active, float p, float r, float y) override {
-        impl_->on_key(out_, debug_, debug_scope_, t, course, key, active, p, r, y);
+    void key(const char* /*dev*/, unsigned long long /*t*/, unsigned course, unsigned key, bool active, float p, float r, float y) override {
+        impl_->on_key(out_, debug_, debug_scope_, mono_now_us(), course, key, active, p, r, y);
         if (course == 0 && key < 18) {
             led_.onActive(key, active);
         }
     }
 
-    void button(const char* /*dev*/, unsigned long long t, unsigned key, bool active) override {
-        impl_->on_button(out_, debug_, debug_scope_, t, key, active);
+    void button(const char* /*dev*/, unsigned long long /*t*/, unsigned key, bool active) override {
+        impl_->on_button(out_, debug_, debug_scope_, mono_now_us(), key, active);
         if (key < 4) {
             led_.onActive(18 + key, active);
         }
@@ -703,12 +717,12 @@ class MidiBridgeCallback : public EigenApi::LifecycleCallback, public EigenApi::
         handle_led_control(msg, led_);
     }
 
-    void breath(const char* /*dev*/, unsigned long long t, float val) override {
-        impl_->on_breath(out_, debug_, debug_scope_, t, val);
+    void breath(const char* /*dev*/, unsigned long long /*t*/, float val) override {
+        impl_->on_breath(out_, debug_, debug_scope_, mono_now_us(), val);
     }
 
-    void strip(const char* /*dev*/, unsigned long long t, unsigned strip, float val, bool active) override {
-        impl_->on_strip(out_, debug_, debug_scope_, t, strip, val, active);
+    void strip(const char* /*dev*/, unsigned long long /*t*/, unsigned strip, float val, bool active) override {
+        impl_->on_strip(out_, debug_, debug_scope_, mono_now_us(), strip, val, active);
     }
 
     const char* implementation_name() const {
