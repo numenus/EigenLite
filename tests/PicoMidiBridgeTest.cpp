@@ -41,6 +41,23 @@ class RecordingLedState : public LedState {
     }
 };
 
+// gate a parity note on key 0 with a rising attack; returns t after the last frame
+unsigned long long gate_parity_note(ParityMidiBridgeImplementation& impl, RecordingSink& sink,
+                                    unsigned long long t0 = 1) {
+    for (unsigned long long i = 0; i < kParityEstimationFrames; ++i) {
+        const float p = 0.5f * static_cast<float>(i + 1) / kParityEstimationFrames;
+        impl.on_key(sink, false, DebugScope::All, t0 + i, 0, 0, true, p, 0.f, 0.f);
+    }
+    return t0 + kParityEstimationFrames;
+}
+
+bool saw_msg(const RecordingSink& sink, uint8_t status, uint8_t d1) {
+    for (const auto& m : sink.sent) {
+        if (m.status == status && m.d1 == d1) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 // --- Stable: keys ------------------------------------------------------
@@ -93,17 +110,16 @@ TEST(StableBridge, IgnoresPercussionCourseAndOutOfRangeKey) {
 
 // --- Stable: mode buttons -----------------------------------------------
 
-TEST(StableBridge, ModeButtonsMapToNotes44Through47) {
+TEST(StableBridge, MappableModeButtonsSendNotes46And47) {
+    // buttons 0/1 are the octave switches and must send no notes
     StableMidiBridgeImplementation impl;
     RecordingSink sink;
     for (unsigned button = 0; button < 4; ++button) {
         impl.on_button(sink, false, DebugScope::All, 0, button, true);
     }
-    ASSERT_EQ(sink.sent.size(), 4u);
-    EXPECT_EQ(sink.sent[0], (Msg{0x90, 44, 127}));
-    EXPECT_EQ(sink.sent[1], (Msg{0x90, 45, 127}));
-    EXPECT_EQ(sink.sent[2], (Msg{0x90, 46, 127}));
-    EXPECT_EQ(sink.sent[3], (Msg{0x90, 47, 127}));
+    ASSERT_EQ(sink.sent.size(), 2u);
+    EXPECT_EQ(sink.sent[0], (Msg{0x90, 46, 127}));
+    EXPECT_EQ(sink.sent[1], (Msg{0x90, 47, 127}));
 }
 
 TEST(StableBridge, ModeButtonReleaseSendsNoteOff) {
@@ -119,6 +135,73 @@ TEST(StableBridge, IgnoresOutOfRangeButtonIndex) {
     RecordingSink sink;
     impl.on_button(sink, false, DebugScope::All, 0, 4, true);
     EXPECT_TRUE(sink.sent.empty());
+}
+
+// --- Octave switching -------------------------------------------------------
+
+namespace {
+void press_button(StableMidiBridgeImplementation& impl, RecordingSink& sink, unsigned button) {
+    impl.on_button(sink, false, DebugScope::All, 0, button, true);
+    impl.on_button(sink, false, DebugScope::All, 0, button, false);
+}
+}  // namespace
+
+TEST(StableBridge, OctaveUpShiftsNewNotesByTwelve) {
+    StableMidiBridgeImplementation impl;
+    RecordingSink sink;
+    press_button(impl, sink, kOctaveUpButton);
+    EXPECT_EQ(impl.octave_shift(), 1);
+    impl.on_key(sink, false, DebugScope::All, 0, 0, 0, true, 0.5f, 0.f, 0.f);
+    EXPECT_EQ(sink.sent[0], (Msg{0x90, 60, 64}));
+}
+
+TEST(StableBridge, HeldNoteKeepsPitchAcrossOctaveChange) {
+    StableMidiBridgeImplementation impl;
+    RecordingSink sink;
+    impl.on_key(sink, false, DebugScope::All, 0, 0, 0, true, 0.5f, 0.f, 0.f);
+    press_button(impl, sink, kOctaveUpButton);
+    sink.sent.clear();
+    // aftertouch and the release both stay on the original pitch
+    impl.on_key(sink, false, DebugScope::All, 1, 0, 0, true, 0.7f, 0.f, 0.f);
+    impl.on_key(sink, false, DebugScope::All, 2, 0, 0, false, 0.f, 0.f, 0.f);
+    ASSERT_EQ(sink.sent.size(), 2u);
+    EXPECT_EQ(sink.sent[0].d1, 48);
+    EXPECT_EQ(sink.sent[1], (Msg{0x80, 48, 0}));
+}
+
+TEST(StableBridge, OctaveShiftClampsToConfiguredRange) {
+    StableMidiBridgeImplementation impl;
+    RecordingSink sink;
+    for (int i = 0; i < 10; ++i) press_button(impl, sink, kOctaveUpButton);
+    EXPECT_EQ(impl.octave_shift(), kOctaveShiftMax);
+    for (int i = 0; i < 20; ++i) press_button(impl, sink, kOctaveDownButton);
+    EXPECT_EQ(impl.octave_shift(), kOctaveShiftMin);
+}
+
+TEST(ParityBridge, GatedNoteUsesOctaveShiftFromNoteStart) {
+    ParityMidiBridgeImplementation impl;
+    RecordingSink sink;
+    press_button(impl, sink, kOctaveUpButton);
+    press_button(impl, sink, kOctaveUpButton);
+    const unsigned long long t = gate_parity_note(impl, sink);
+    (void)t;
+    EXPECT_TRUE(saw_msg(sink, 0x90, 72)) << "note gates two octaves up";
+    sink.sent.clear();
+    press_button(impl, sink, kOctaveDownButton);  // shift while sounding
+    impl.on_key(sink, false, DebugScope::All, 500, 0, 0, false, 0.f, 0.f, 0.f);
+    EXPECT_TRUE(saw_msg(sink, 0x80, 72)) << "release uses the captured pitch";
+}
+
+TEST(OctaveLedTest, ColoursTrackShiftDirectionAndMagnitude) {
+    EXPECT_EQ(octave_up_led(0), EigenApi::Eigenharp::LED_OFF);
+    EXPECT_EQ(octave_down_led(0), EigenApi::Eigenharp::LED_OFF);
+    EXPECT_EQ(octave_up_led(1), EigenApi::Eigenharp::LED_GREEN);
+    EXPECT_EQ(octave_up_led(2), EigenApi::Eigenharp::LED_ORANGE);
+    EXPECT_EQ(octave_up_led(4), EigenApi::Eigenharp::LED_ORANGE);
+    EXPECT_EQ(octave_down_led(-1), EigenApi::Eigenharp::LED_RED);
+    EXPECT_EQ(octave_down_led(-2), EigenApi::Eigenharp::LED_ORANGE);
+    EXPECT_EQ(octave_up_led(-1), EigenApi::Eigenharp::LED_OFF);
+    EXPECT_EQ(octave_down_led(1), EigenApi::Eigenharp::LED_OFF);
 }
 
 // --- Stable: breath and ribbon -------------------------------------------
@@ -287,25 +370,6 @@ TEST(ParityBridge, RollIsRelativeToNoteStartAndGated) {
 // frames force a resync: the key just goes silent while the note is sounding.
 // Other events (breath streams constantly) keep flowing, so a gated note
 // whose key has been silent past kStuckNoteTimeoutUs is force-released.
-
-namespace {
-// gate a parity note on key 0 with a rising attack; returns t after the last frame
-unsigned long long gate_parity_note(ParityMidiBridgeImplementation& impl, RecordingSink& sink,
-                                    unsigned long long t0 = 1) {
-    for (unsigned long long i = 0; i < kParityEstimationFrames; ++i) {
-        const float p = 0.5f * static_cast<float>(i + 1) / kParityEstimationFrames;
-        impl.on_key(sink, false, DebugScope::All, t0 + i, 0, 0, true, p, 0.f, 0.f);
-    }
-    return t0 + kParityEstimationFrames;
-}
-
-bool saw_msg(const RecordingSink& sink, uint8_t status, uint8_t d1) {
-    for (const auto& m : sink.sent) {
-        if (m.status == status && m.d1 == d1) return true;
-    }
-    return false;
-}
-}  // namespace
 
 TEST(ParityBridge, WatchdogReleasesNoteWhenKeyStreamGoesSilent) {
     ParityMidiBridgeImplementation impl;

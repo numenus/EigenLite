@@ -23,6 +23,15 @@ constexpr uint8_t kRibbonCc = 21;
 constexpr uint8_t kRibbonRelativeCc = 22;
 constexpr uint8_t kRollCc = 74;
 constexpr uint8_t kModeButtonBaseNote = 44;
+// octave switching: the first two mode buttons shift all NEW notes by +-12
+// per press (sounding notes keep their pitch and release correctly); they no
+// longer send MIDI notes 44/45. Buttons 2/3 stay plain MIDI notes 46/47 for
+// MIDI-learn. The buttons' LEDs show the current shift (up: green +1,
+// orange >= +2; down: red -1, orange <= -2; both off at centre).
+constexpr unsigned kOctaveDownButton = 0;
+constexpr unsigned kOctaveUpButton = 1;
+constexpr int kOctaveShiftMin = -2;
+constexpr int kOctaveShiftMax = 4;
 // LED control protocol (Bitwig -> Pico), channel 16:
 // Note On (0x9F): note = key/button index (0-17 main, 18-21 mode buttons),
 // velocity picks the colour by thirds (0=off, 1-42 green, 43-84 red,
@@ -77,6 +86,18 @@ inline float scale_parity_key_velocity(float v) {
     if (v > 1.0f) v = 1.0f;
     v = std::pow(v, kParityKeyVelocityCurve);
     return kParityKeyVelocityFloor + v * (1.0f - kParityKeyVelocityFloor);
+}
+
+inline EigenApi::Eigenharp::LedColour octave_up_led(int shift) {
+    if (shift >= 2) return EigenApi::Eigenharp::LED_ORANGE;
+    if (shift == 1) return EigenApi::Eigenharp::LED_GREEN;
+    return EigenApi::Eigenharp::LED_OFF;
+}
+
+inline EigenApi::Eigenharp::LedColour octave_down_led(int shift) {
+    if (shift <= -2) return EigenApi::Eigenharp::LED_ORANGE;
+    if (shift == -1) return EigenApi::Eigenharp::LED_RED;
+    return EigenApi::Eigenharp::LED_OFF;
 }
 
 enum class BridgeModeKind {
@@ -270,6 +291,7 @@ class MidiBridgeImplementation {
     virtual void on_strip(MidiSink& out, bool debug, DebugScope debug_scope, unsigned long long t, unsigned strip, float val, bool active) = 0;
     // force note-off for everything sounding (device disconnect / shutdown)
     virtual void release_all(MidiSink& out) = 0;
+    virtual int octave_shift() const = 0;
 };
 
 class StableMidiBridgeImplementation : public MidiBridgeImplementation {
@@ -279,6 +301,11 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
         for (uint8_t& v : last_pressure_) v = 0xFF;
         for (uint8_t& v : last_cc_) v = 0xFF;
         for (unsigned long long& v : key_last_event_t_) v = 0ULL;
+        for (uint8_t& v : key_note_) v = 0;
+    }
+
+    int octave_shift() const override {
+        return octave_shift_;
     }
 
     const char* name() const override {
@@ -296,19 +323,19 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
 
         reap_stuck_notes(out, t);
 
-        const uint8_t note = static_cast<uint8_t>(key + 48);
         const uint8_t vel = static_cast<uint8_t>(to_u7(p));
 
         if (active) {
             key_last_event_t_[key] = t;
             if (!key_down_[key]) {
-                out.send3(0x90, note, vel == 0 ? 1 : vel);
+                key_note_[key] = shifted_note(key);
+                out.send3(0x90, key_note_[key], vel == 0 ? 1 : vel);
                 key_down_[key] = true;
             }
-            send_poly_pressure(out, note, p);
+            send_poly_pressure(out, key, key_note_[key], p);
         } else {
             if (key_down_[key]) {
-                out.send3(0x80, note, 0);
+                out.send3(0x80, key_note_[key], 0);
                 key_down_[key] = false;
             }
             last_pressure_[key] = 0xFF;
@@ -325,6 +352,18 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
         }
 
         reap_stuck_notes(out, t);
+
+        if (key == kOctaveDownButton || key == kOctaveUpButton) {
+            if (active) {
+                const int step = (key == kOctaveUpButton) ? 1 : -1;
+                int next = octave_shift_ + step;
+                if (next < kOctaveShiftMin) next = kOctaveShiftMin;
+                if (next > kOctaveShiftMax) next = kOctaveShiftMax;
+                octave_shift_ = next;
+                std::cout << "octave shift " << (octave_shift_ > 0 ? "+" : "") << octave_shift_ << std::endl;
+            }
+            return;  // octave buttons don't send MIDI notes
+        }
 
         const uint8_t note = static_cast<uint8_t>(kModeButtonBaseNote + key);
         if (active) {
@@ -353,13 +392,23 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
     void release_all(MidiSink& out) override {
         for (unsigned key = 0; key < 128; ++key) {
             if (!key_down_[key]) continue;
-            out.send3(0x80, static_cast<uint8_t>(key + 48), 0);
+            out.send3(0x80, key_note_[key], 0);
             key_down_[key] = false;
             last_pressure_[key] = 0xFF;
         }
     }
 
    protected:
+    // note = key + 48, shifted by the current octave and clamped to MIDI
+    // range; captured per key at note-on so octave changes never orphan a
+    // sounding note's release
+    uint8_t shifted_note(unsigned key) const {
+        int n = static_cast<int>(key) + 48 + octave_shift_ * 12;
+        if (n < 0) n = 0;
+        if (n > 127) n = 127;
+        return static_cast<uint8_t>(n);
+    }
+
     // see kStuckNoteTimeoutUs; called from every event handler so a stuck
     // key is reaped by whatever traffic is still flowing (breath streams
     // constantly), and a re-press of a stuck key reaps itself first and
@@ -370,16 +419,15 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
             if (!key_down_[key]) continue;
             if (latest_event_t_ - key_last_event_t_[key] <= kStuckNoteTimeoutUs) continue;
             std::cout << "watchdog: releasing stuck note key=" << key
-                      << " note=" << (key + 48)
+                      << " note=" << static_cast<unsigned>(key_note_[key])
                       << " silent_ms=" << (latest_event_t_ - key_last_event_t_[key]) / 1000
                       << std::endl;
-            out.send3(0x80, static_cast<uint8_t>(key + 48), 0);
+            out.send3(0x80, key_note_[key], 0);
             key_down_[key] = false;
             last_pressure_[key] = 0xFF;
         }
     }
-    void send_poly_pressure(MidiSink& out, uint8_t note, float p) {
-        const unsigned key = static_cast<unsigned>(note - 48);
+    void send_poly_pressure(MidiSink& out, unsigned key, uint8_t note, float p) {
         if (key >= 128) return;
         const uint8_t midi = static_cast<uint8_t>(to_u7(p));
         if (last_pressure_[key] == midi) return;
@@ -398,6 +446,8 @@ class StableMidiBridgeImplementation : public MidiBridgeImplementation {
     bool key_down_[128];
     uint8_t last_pressure_[128];
     uint8_t last_cc_[8];
+    uint8_t key_note_[128];
+    int octave_shift_ = 0;
     unsigned long long latest_event_t_ = 0ULL;
     unsigned long long key_last_event_t_[128];
 };
@@ -429,7 +479,9 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
         reap_stuck_notes(out, t);
 
         auto& state = keys_[key];
-        const uint8_t note = static_cast<uint8_t>(key + 48);
+        // prospective pitch before the note gates, the captured pitch after
+        // (octave changes must not orphan a sounding note's release)
+        const uint8_t note = state.note_on ? state.note : shifted_note(key);
 
         if (active) {
             state.last_event_t = t;
@@ -514,6 +566,7 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
                 }
                 out.send3(0x90, note, vel == 0 ? 1 : vel);
                 state.note_on = true;
+                state.note = note;
                 state.roll_origin = r;
             } else {
                 if (debug && debug_scope == DebugScope::Gates) {
@@ -591,7 +644,7 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
     void release_all(MidiSink& out) override {
         for (unsigned key = 0; key < 128; ++key) {
             if (!keys_[key].note_on) continue;
-            out.send3(0x80, static_cast<uint8_t>(key + 48), 0);
+            out.send3(0x80, keys_[key].note, 0);
             send_cc(out, kRollCc, 0.5f, 2);
             keys_[key] = {};
             last_pressure_[key] = 0xFF;
@@ -606,10 +659,10 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
             if (!state.note_on) continue;
             if (latest_event_t_ - state.last_event_t <= kStuckNoteTimeoutUs) continue;
             std::cout << "watchdog: releasing stuck note key=" << key
-                      << " note=" << (key + 48)
+                      << " note=" << static_cast<unsigned>(state.note)
                       << " silent_ms=" << (latest_event_t_ - state.last_event_t) / 1000
                       << " [parity]" << std::endl;
-            out.send3(0x80, static_cast<uint8_t>(key + 48), 0);
+            out.send3(0x80, state.note, 0);
             send_cc(out, kRollCc, 0.5f, 2);  // recentre roll with the note
             state = {};
             last_pressure_[key] = 0xFF;
@@ -626,17 +679,10 @@ class ParityMidiBridgeImplementation : public StableMidiBridgeImplementation {
         float first_pressure = 0.0f;
         float max_pressure = 0.0f;
         float roll_origin = 0.0f;
+        uint8_t note = 0;  // pitch captured at gate time (octave-shifted)
         unsigned long long last_release_ts = 0ULL;
         unsigned long long last_event_t = 0ULL;
     };
-
-    void send_poly_pressure(MidiSink& out, unsigned key, uint8_t note, float p) {
-        if (key >= 128) return;
-        const uint8_t midi = static_cast<uint8_t>(to_u7(p));
-        if (last_pressure_[key] == midi) return;
-        last_pressure_[key] = midi;
-        out.send3(0xA0, note, midi);
-    }
 
     KeyState keys_[128];
     float strip_origin_[kMaxStrips] = {0.0f};
@@ -708,6 +754,13 @@ class MidiBridgeCallback : public EigenApi::LifecycleCallback, public EigenApi::
 
     void button(const char* /*dev*/, unsigned long long /*t*/, unsigned key, bool active) override {
         impl_->on_button(out_, debug_, debug_scope_, mono_now_us(), key, active);
+        if (key == kOctaveDownButton || key == kOctaveUpButton) {
+            // octave state owns these two LEDs (base colour; the orange
+            // press-flash still overlays while held)
+            const int shift = impl_->octave_shift();
+            led_.setBaseColour(18 + kOctaveDownButton, octave_down_led(shift));
+            led_.setBaseColour(18 + kOctaveUpButton, octave_up_led(shift));
+        }
         if (key < 4) {
             led_.onActive(18 + key, active);
         }

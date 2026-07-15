@@ -59,11 +59,16 @@ as a MIDI controller in Bitwig through:
 
 ### Mode Buttons
 
-- the 4 Pico body buttons -> MIDI Note On/Off, channel 1
-- note number = `44 + button` (44-47), velocity 127, momentary
-- sits just below the main-key note range (48-65) so it never collides
-- same mapping in both `stable` and `parity`
-- Bitwig-mappable via ordinary MIDI learn, like any other controller button
+- buttons 0/1 (first two) = **octave down / octave up**: each press shifts
+  all NEW notes by -/+12; sounding notes keep their pitch and release
+  correctly. Range clamps to `kOctaveShiftMin`..`kOctaveShiftMax` (-2..+4).
+  These two send no MIDI notes.
+- octave state on the button LEDs: up button green at +1, orange at >= +2;
+  down button red at -1, orange at <= -2; both off at centre. (DAW LED
+  control of these two indices gets overwritten on octave presses.)
+- buttons 2/3 -> MIDI Note On/Off, channel 1, notes 46/47, velocity 127,
+  momentary -- Bitwig-mappable via ordinary MIDI learn (e.g. SWAM toggles)
+- same behaviour in both `stable` and `parity`
 
 ### Roll (parity mode only)
 
@@ -236,6 +241,9 @@ Breath: `kBreathMidiGain` (6, stable-mode sensitivity),
 Mapping surface: `kBreathCc` 2, `kRibbonCc` 21, `kRibbonRelativeCc` 22,
 `kRollCc` 74 (`kParityRollGain` 1.0 = rocking sensitivity), `kModeButtonBaseNote` 44, main keys = `key + 48`. LED colour
 thresholds are the velocity thirds in `handle_led_control`.
+
+Octave switching: `kOctaveDownButton` 0, `kOctaveUpButton` 1 (which two
+buttons switch), `kOctaveShiftMin` -2 / `kOctaveShiftMax` +4 (range).
 
 Watchdog: `kStuckNoteTimeoutUs` (250000) -- raise if legitimate held notes
 ever get cut (they shouldn't; held keys stream events continuously), lower
