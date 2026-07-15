@@ -112,6 +112,13 @@ more aggressive pipe draining).
 - [x] latency: struck by user -- native path responds appropriately in play
 - [ ] consider upstreaming: atomic_flag init, checkFirmware rename,
       dead-device cleanup ordering, garbage decoder timestamps on resync
+- [ ] known, low-priority (self-heals via ps1 relaunch loop): cold-start
+      race -- after the firmware load re-enumerates the pico, a stale scan
+      snapshot still lists the pre-load device name; connectNewPico opens
+      the phantom, the failed USB open isn't propagated, creation crashes
+      with an access violation (observed live 2026-07-15; costs ~15s, cold
+      plug only). Fix when convenient: re-verify device presence before
+      connect + make open failure abort creation. Same race exists on Linux.
 
 ## Closed 2026-07-15
 
