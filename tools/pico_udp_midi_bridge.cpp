@@ -131,6 +131,18 @@ void bridge_log_filter(const char* msg) {
             std::cerr << "[+" << uptime_seconds() << "s] log:" << msg << " [x" << transfer_errors << "]" << std::endl;
             return;
         }
+        // chronic on Windows (~1/s): the in-pipe recycles buffers before the
+        // reader drains them. Correlates with skipped frames (the stuck-note
+        // trigger), so keep a sampled trace instead of dropping it outright
+        if (std::strstr(msg, "stealing buffers") != nullptr) {
+            static unsigned long buffer_steals = 0;
+            ++buffer_steals;
+            if (buffer_steals > 3 && buffer_steals % 250 != 0) {
+                return;
+            }
+            std::cerr << "[+" << uptime_seconds() << "s] log:" << msg << " [x" << buffer_steals << "]" << std::endl;
+            return;
+        }
     }
     std::cerr << "[+" << uptime_seconds() << "s] log:" << msg << std::endl;
 }
