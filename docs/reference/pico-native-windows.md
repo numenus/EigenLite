@@ -104,4 +104,4 @@ the invoking window (Ctrl+C to stop).
 - 2026-07-15: stuck-note fix validated (watchdog + bridge-local monotonic
   timestamps; lost key-ups from decoder resyncs self-heal in ~250ms). Rapid
   sustained play: no stuck notes, no watchdog fires. Only remaining item:
-  subjective latency comparison vs the WSL chain.
+  subjective latency comparison vs the WSL chain. (Struck by user 2026-07-15: responsiveness validated in play; task closed, octave switching added.)

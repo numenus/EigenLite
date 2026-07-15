@@ -106,7 +106,16 @@ more aggressive pipe draining).
 - [x] parity feel: velocity range-mapped (attack max pressure), relative
       gated roll (CC74), tuning cheat-sheet in pico-bitwig-midi.md
 - [x] stuck notes: watchdog + monotonic timestamps (see 2026-07-15 section)
-- [ ] latency vs WSL chain (play-testing only)
+- [x] octave switching: mode buttons 0/1 = +-12 clamped -2..+4, LED state,
+      sounding notes keep pitch; found+fixed: Pico streams button events
+      while held -> all button handling edge-triggered (2026-07-15)
+- [x] latency: struck by user -- native path responds appropriately in play
 - [ ] consider upstreaming: atomic_flag init, checkFirmware rename,
       dead-device cleanup ordering, garbage decoder timestamps on resync
+
+## Closed 2026-07-15
+
+Native Windows path feature-complete and live-validated end to end. WSL
+chain remains documented as fallback. Only open thread is the optional
+upstreaming of the four EigenLite findings (tracked above).
 - [ ] roadmap cross-ref + close-out
