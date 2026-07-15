@@ -58,6 +58,39 @@ raw-fprintf instrumentation proved discover thread ran but spinlock never
 acquired -> flag init. Validated natively: enumeration, firmware self-load
 (no pico_loader.py), iso input over libusb-win32 driver, keys -> loopMIDI.
 
+## Stuck-note round (2026-07-15)
+
+Symptom: notes randomly stuck sounding forever; loopMIDI shows zero traffic
+while stuck; one bad session held every note played.
+
+Root cause chain (validated live):
+1. USB reader occasionally loses iso frames (`pop_free_queue() stealing
+   buffers`) -> forced decoder resync.
+2. Closed decoder drops key tracking on resync without emitting a key-up ->
+   bridge never sees `active=false` -> stuck MIDI note.
+3. Amplifier: heavy console output (debug dumps, later the watchdog's own
+   spam) blocks the same loop that drains the USB pipe -> more steals ->
+   more lost releases -> feedback loop. Explains the all-notes-stuck session.
+
+Fixes (all in `tools/pico_midi_bridge_core.h` / `pico_udp_midi_bridge.cpp`):
+- stuck-note watchdog, both modes: a sounding note whose key is silent
+  >`kStuckNoteTimeoutUs` (250ms) while other events flow (breath streams
+  constantly) is force-released + key re-armed; `release_all()` flushes
+  notes on device disconnect. 5 new unit tests.
+- watchdog v1 trusted device timestamps -> endless release/retrigger loop:
+  decoder emits garbage ts `0x8000000000000000` (x86 failed float->int64
+  sentinel) during resyncs, which latched the max. Now all impl-facing
+  events are stamped with bridge-local monotonic time (`mono_now_us()`);
+  device ts no longer used for arithmetic (also de-poisons parity debounce).
+  **This garbage-timestamp behaviour is a third upstream-relevant finding.**
+- `stealing buffers` log throttled (first 3 + every 250th, with count).
+
+Validated 2026-07-15: rapid sustained play across rolls/breath/ribbon -- no
+stuck notes, no watchdog fires, steals only a 3-count startup burst (never
+reached x250). Considered closed; a `watchdog:` line with sane silent_ms in
+normal play is the signal the USB reader needs attention (more read URBs /
+more aggressive pipe draining).
+
 ## Live validation status (2026-07-12)
 
 - [x] notes/keys/press-lights native (07-11)
@@ -70,7 +103,10 @@ acquired -> flag init. Validated natively: enumeration, firmware self-load
       Bitwig's default draw area)
 - [x] replug recovery: in-process teardown race crashes bridge (accepted);
       pico-native.ps1 relaunch loop makes replug self-heal -- validated
-- [ ] parity mode feel session, latency vs WSL chain (play-testing only)
+- [x] parity feel: velocity range-mapped (attack max pressure), relative
+      gated roll (CC74), tuning cheat-sheet in pico-bitwig-midi.md
+- [x] stuck notes: watchdog + monotonic timestamps (see 2026-07-15 section)
+- [ ] latency vs WSL chain (play-testing only)
 - [ ] consider upstreaming: atomic_flag init, checkFirmware rename,
-      dead-device cleanup ordering
+      dead-device cleanup ordering, garbage decoder timestamps on resync
 - [ ] roadmap cross-ref + close-out

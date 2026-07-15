@@ -98,3 +98,10 @@ the invoking window (Ctrl+C to stop).
   events to loopMIDI. Not yet exercised live: Bitwig LED control path, parity
   mode, cold-replug auto-reconnect (code path fixed but untested), latency
   vs the WSL chain.
+- 2026-07-12..14: LED control path (Bitwig HW Instrument ch16), replug
+  self-heal via relaunch loop, parity velocity + relative roll, startup 16s
+  (shared libusb context + pico-only device filter) -- all validated live.
+- 2026-07-15: stuck-note fix validated (watchdog + bridge-local monotonic
+  timestamps; lost key-ups from decoder resyncs self-heal in ~250ms). Rapid
+  sustained play: no stuck notes, no watchdog fires. Only remaining item:
+  subjective latency comparison vs the WSL chain.
