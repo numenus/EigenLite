@@ -38,6 +38,10 @@
 #define URBS_PER_PIPE_READ    	    16
 #define FRAMES_PER_URB_READ         4
 #define ALLOCATED_URBS_READ   	    32
+// consecutive failed URB completions (no success between) before the device
+// is declared dead; a dead device fails transfers instantly, so without this
+// the completion callback resubmits in a hot spin forever
+#define MAX_CONSECUTIVE_URB_ERRORS  100
 
 #define URBS_PER_PIPE_WRITE         16
 
@@ -165,6 +169,7 @@ namespace
 
 		bool died_;
 		bool stolen_;
+		unsigned consecutive_errors_;
 	};
 
 };
@@ -468,7 +473,7 @@ unsigned char *pic::usbdevice_t::iso_out_guard_t::advance()
 usbpipe_in_t::usbpipe_in_t(pic::usbdevice_t::impl_t *dev, pic::usbdevice_t::iso_in_pipe_t *pipe): 
 		pipe_(pipe),device_(dev), piperef_(pipe->in_pipe_name()),
 		size_(pipe->in_pipe_size()), frame_(0ULL),  died_(false),
-		stolen_(false)
+		stolen_(false), consecutive_errors_(0)
 {
 	LOG_SINGLE(pic::logmsg() << "pic::usbdevice_t::usbpipe_in_t::impl_t " << piperef_ ; )
 
@@ -585,9 +590,20 @@ void LIBUSB_CALL usbpipe_in_t::completed(libusb_transfer* transfer)
     if(status!=LIBUSB_TRANSFER_COMPLETED)
     {
         pic::logmsg() << "usbpipe_in_t::completed unsuccessful " << libusb_error_name(status) << " (" << status << ")";
+        if(++pipe->consecutive_errors_ == MAX_CONSECUTIVE_URB_ERRORS)
+        {
+            // device gone or bus dead: stop resubmitting so in-flight URBs
+            // drain, the event thread exits, and thread_main reports the
+            // death (pipes_died -> kbd_dead -> dead-device teardown)
+            pic::logmsg() << "usbpipe_in_t::completed " << pipe->consecutive_errors_
+                          << " consecutive failed transfers - declaring device dead";
+            pipe->device_->died_ = true;
+            pipe->device_->stopping_ = true;
+        }
     }
     else
     {
+        pipe->consecutive_errors_ = 0;
 	//if(transfer->length!=transfer->actual_length)
 	//{
 	//pic::logmsg() << "usbpipe_in_t::completed underfilled packet " << libusb_error_name(transfer->status) << " (" << transfer->status << ")" 

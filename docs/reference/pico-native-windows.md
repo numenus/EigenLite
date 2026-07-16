@@ -105,3 +105,9 @@ the invoking window (Ctrl+C to stop).
   timestamps; lost key-ups from decoder resyncs self-heal in ~250ms). Rapid
   sustained play: no stuck notes, no watchdog fires. Only remaining item:
   subjective latency comparison vs the WSL chain. (Struck by user 2026-07-15: responsiveness validated in play; task closed, octave switching added.)
+- 2026-07-16: overnight device drop exposed missing death detection — bridge
+  hot-spun resubmitting failed URBs all night (8.5M `LIBUSB_TRANSFER_ERROR`),
+  degrading the whole machine. Fixed: 100 consecutive failed completions now
+  declare the device dead and route through normal teardown + rescan; ps1
+  relaunch loop recovers. If the pico's LEDs cycle on their own after such an
+  event, the device itself is wedged — power-cycle its USB port.

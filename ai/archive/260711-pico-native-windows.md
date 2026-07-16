@@ -91,6 +91,28 @@ reached x250). Considered closed; a `watchdog:` line with sane silent_ms in
 normal play is the signal the USB reader needs attention (more read URBs /
 more aggressive pipe draining).
 
+## Overnight error-spin round (2026-07-16)
+
+Symptom: rig left online overnight; pico dropped off the bus; bridge spun all
+night resubmitting instantly-failing URBs (`completed unsuccessful
+LIBUSB_TRANSFER_ERROR` x8.5M), eating CPU/log I/O until the machine bogged
+down and other MIDI devices (Erae 2, Seaboard) stopped responding. Octave-up
+LED kept cycling green even after bridge kill = the pico itself wedged by
+hours of failed control traffic (power-cycle clears).
+
+Root cause: `pic_usb_linux.cpp` death detection only triggered on
+`libusb_submit_transfer` failure or event-loop failure. On this backend
+submits kept succeeding while completions returned TRANSFER_ERROR -> neither
+detector fired -> `completed()` resubmitted forever.
+
+Fix: per-pipe `consecutive_errors_` counter in `completed()`; reset on
+success; at `MAX_CONSECUTIVE_URB_ERRORS` (100) set `died_`+`stopping_` only
+(no callback-context libusb calls -> no sync-transfer deadlock). Resubmission
+stops, in-flight URBs drain, thread_main exits and reports via existing
+`pipes_died -> kbd_dead -> deadDevices_ -> destroy + rescan` chain; ps1
+relaunch loop covers the rest. **Upstream-relevant finding (affects Linux
+identically).**
+
 ## Live validation status (2026-07-12)
 
 - [x] notes/keys/press-lights native (07-11)
@@ -111,7 +133,8 @@ more aggressive pipe draining).
       while held -> all button handling edge-triggered (2026-07-15)
 - [x] latency: struck by user -- native path responds appropriately in play
 - [ ] consider upstreaming: atomic_flag init, checkFirmware rename,
-      dead-device cleanup ordering, garbage decoder timestamps on resync
+      dead-device cleanup ordering, garbage decoder timestamps on resync,
+      URB error-spin death detection (2026-07-16 section)
 - [ ] known, low-priority (self-heals via ps1 relaunch loop): cold-start
       race -- after the firmware load re-enumerates the pico, a stale scan
       snapshot still lists the pre-load device name; connectNewPico opens
